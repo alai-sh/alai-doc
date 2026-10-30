@@ -101,7 +101,75 @@ def test_page(project: World) -> None:
         assert "▸ state      str         = present" in text
         assert app.theme == "textual-dark"
         assert app.sub_title == "ns.coll.thing"
-        assert "⏎ Open/close {} Section q Quit [] Back/forward e/c Open/close all" in text
+        assert "⏎ Open/close q Quit / Find ? Keys [] Back/forward" in text
+
+    run("ns.coll.thing", steps, types=("module",))
+
+
+def test_find(project: World) -> None:
+    from textual.content import Content
+    from textual.widgets import Static
+
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        # n and N are only there once something's being found.
+        assert "n/N Match" not in screen(app)
+        await settle(pilot, "slash", *"the")
+        # Typed into the box, as are keys the page has.
+        assert app.query_one("#find-text").value == "the"  # pyright: ignore[reportAttributeAccessIssue]
+        assert "10 matches" in screen(app)
+        # Marked where it shows.
+        prose = app.query_one("Section .prose", Static).content
+        assert isinstance(prose, Content)
+        assert [prose.plain[s.start : s.end] for s in prose.spans if s.style == "reverse"] == ["the"]
+        await settle(pilot, "enter")
+        assert "1/10" in screen(app)
+        assert "n/N Match" in screen(app)
+        await settle(pilot, "n", "n", "n", "n")
+        # In a closed option's children, opened to show it.
+        assert focused(app) == "rules.match.conditions.field"
+        assert opened(app) == {"rules", "rules.match", "rules.match.conditions"}
+        await settle(pilot, "N")
+        assert focused(app) == "name"
+        assert "4/10" in screen(app)
+        # Round from the last to the first.
+        await settle(pilot, *["n"] * 6)
+        assert "10/10" in screen(app)
+        await settle(pilot, "n")
+        assert "1/10" in screen(app)
+
+    run("ns.coll.thing", steps, types=("module",))
+
+
+def test_find_with_case(project: World) -> None:
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        # Only with the case typed, as it has a capital.
+        await settle(pilot, "ctrl+f", *"The", "enter")
+        assert "1/6" in screen(app)
+        await settle(pilot, "slash", "ctrl+u", *"THE")
+        assert "no match" in screen(app)
+        await settle(pilot, "enter", "n")
+        assert focused(app) == "mode"
+
+    run("ns.coll.thing", steps, types=("module",))
+
+
+def test_escape(project: World) -> None:
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        await settle(pilot, "down", "question_mark")
+        assert "Open all" in screen(app)
+        await settle(pilot, "question_mark")
+        assert "Open all" not in screen(app)
+        await settle(pilot, "question_mark", "slash", *"wait")
+        # The keys first, then what's being found, which goes back to where the cursor was, then the viewer.
+        await settle(pilot, "escape")
+        assert "Open all" not in screen(app)
+        assert app.found is not None
+        await settle(pilot, "escape")
+        assert app.found is None
+        assert focused(app) == "mode_kind"
+        assert not app.query_one("#find").has_class("-on")
+        await settle(pilot, "escape")
+        assert not app.is_running
 
     run("ns.coll.thing", steps, types=("module",))
 

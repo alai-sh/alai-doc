@@ -19,9 +19,10 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
+from textual.geometry import Region
 from textual.style import Style
 from textual.widget import Widget
-from textual.widgets import Footer, Static
+from textual.widgets import Footer, HelpPanel, Input, Static
 
 from . import _output
 from ._alai import BUILTIN
@@ -82,6 +83,8 @@ _MAX_COLUMN = 28
 """The widest the names in a group of options make their column; a longer name pushes its own line along."""
 _MAX_FLAG = 24
 """The widest a default is shown on a collapsed line; the whole of it is in the detail."""
+_MARK = "reverse"
+"""How what's being found is marked on the page."""
 
 
 class _Place(Record):
@@ -135,6 +138,27 @@ def _join(*lines: Content | None, gap: str = "\n") -> Content:
     return Content(gap).join([line for line in lines if line is not None and line.plain])
 
 
+class _Text(Static):
+    """Text on the page, with what's being found marked in it."""
+
+    def __init__(self, text: Content, *, classes: str | None = None, id: str | None = None) -> None:  # noqa: A002
+        super().__init__(text, classes=classes, id=id)
+        self.text = text
+
+    def on_mount(self) -> None:
+        # Mounted while something's being found, as an option's children are when it opens.
+        if _t.cast("DocViewer", self.app).found is not None:
+            self.mark()
+
+    def show(self, text: Content) -> None:
+        self.text = text
+        self.mark()
+
+    def mark(self) -> None:
+        found = _t.cast("DocViewer", self.app).found
+        self.update(self.text.highlight_regex(found, style=_MARK) if found is not None else self.text)
+
+
 class Entry(Vertical, can_focus=True):
     """An option or return value: one line, which opens to show all of it and its children, each an Entry too."""
 
@@ -152,19 +176,11 @@ class Entry(Vertical, can_focus=True):
     BINDINGS: _t.ClassVar = [
         Binding("down,j", "move(1)", "Next", show=False),
         # Here, not only on the app, as the page's scrolling has its own Home, End and page keys, which come first.
-        # The section keys are here for the footer too, which shows the focused widget's.
         Binding("home,g", "app.top", "Top", show=False),
         Binding("end,G", "app.bottom", "Bottom", show=False),
         Binding("up,k", "move(-1)", "Previous", show=False),
         Binding("enter,space", "flip", "Open/close"),
-        # One footer entry for the pair, as for [ and ].
-        Binding(
-            "pageup,left_curly_bracket",
-            "app.section(-1)",
-            "Section",
-            tooltip="Previous and next section",
-            key_display="{}",
-        ),
+        Binding("pageup,left_curly_bracket", "app.section(-1)", "Previous section", show=False),
         Binding("pagedown,right_curly_bracket", "app.section(1)", "Next section", show=False),
         Binding("right,l", "open", "Open", show=False),
         Binding("left,h", "close", "Close", show=False),
@@ -197,8 +213,8 @@ class Entry(Vertical, can_focus=True):
         self.is_open = False
 
     def compose(self) -> ComposeResult:
-        yield Static(self._line(), classes="line")
-        yield Static(self._detail(), classes="detail")
+        yield _Text(self._line(), classes="line")
+        yield _Text(self._detail(), classes="detail")
         yield Vertical(classes="children")
 
     def _line(self) -> Content:
@@ -252,9 +268,8 @@ class Entry(Vertical, can_focus=True):
             blocks.append(_sources(entry))
         return _join(*blocks, gap="\n\n")
 
-    async def open(self) -> None:
-        if not self.kids and not self._detail().plain:
-            return
+    async def mount_kids(self) -> None:
+        """Its children, mounted the first time it opens, or when the page is searched."""
         if not self.mounted:
             self.mounted = True
             parent = self.option
@@ -263,9 +278,14 @@ class Entry(Vertical, can_focus=True):
                 Entry(n, e, self.path, crumbs=self.crumbs, column=column, returns=self.returns, parent=parent)
                 for n, e in self.kids.items()
             )
+
+    async def open(self) -> None:
+        if not self.kids and not self._detail().plain:
+            return
+        await self.mount_kids()
         self.is_open = True
         self.add_class("-open")
-        self.query_one(".line", Static).update(self._line())
+        self.query_one(".line", _Text).show(self._line())
         # What opened is below the line, and may be below the screen: once it's laid out, bring it into view, its line
         # kept on screen if it's taller than the screen.
         self.call_after_refresh(self._show_opened)
@@ -277,7 +297,7 @@ class Entry(Vertical, can_focus=True):
     def close(self) -> None:
         self.is_open = False
         self.remove_class("-open")
-        self.query_one(".line", Static).update(self._line())
+        self.query_one(".line", _Text).show(self._line())
 
     async def action_flip(self) -> None:
         if self.is_open:
@@ -326,19 +346,11 @@ class Section(Vertical, can_focus=True):
     BINDINGS: _t.ClassVar = [
         Binding("down,j", "move(1)", "Next", show=False),
         # Here, not only on the app, as the page's scrolling has its own Home, End and page keys, which come first.
-        # The section keys are here for the footer too, which shows the focused widget's.
         Binding("home,g", "app.top", "Top", show=False),
         Binding("end,G", "app.bottom", "Bottom", show=False),
         Binding("up,k", "move(-1)", "Previous", show=False),
         Binding("enter,space", "flip", "Open/close"),
-        # One footer entry for the pair, as for [ and ].
-        Binding(
-            "pageup,left_curly_bracket",
-            "app.section(-1)",
-            "Section",
-            tooltip="Previous and next section",
-            key_display="{}",
-        ),
+        Binding("pageup,left_curly_bracket", "app.section(-1)", "Previous section", show=False),
         Binding("pagedown,right_curly_bracket", "app.section(1)", "Next section", show=False),
         Binding("right,l", "open", "Open", show=False),
         Binding("left,h", "close", "Close", show=False),
@@ -408,7 +420,7 @@ class _Bullet(Horizontal):
 
     def compose(self) -> ComposeResult:
         yield Static("•", classes="mark")
-        yield Static(self.text, classes="text")
+        yield _Text(self.text, classes="text")
 
 
 def _flag(entry: dict[str, object], parent: str | None, *, returns: bool) -> list[tuple[str, str]]:
@@ -498,13 +510,22 @@ class DocViewer(App[None]):
     .under-caption { height: auto; max-width: 104; margin: 0 0 0 3; }
     .entries { height: auto; }
     #status { height: 1; padding: 0 1; }
+    #find { height: 1; display: none; }
+    #find.-on { display: block; }
+    #find > Input { width: 1fr; height: 1; border: none; padding: 0 1; }
+    #found { width: auto; padding: 0 1; color: $text-muted; }
     """
     BINDINGS: _t.ClassVar = [
-        Binding("q,escape", "quit", "Quit"),
+        Binding("q", "quit", "Quit"),
+        Binding("escape", "dismiss", "Close, or quit", show=False),
+        Binding("slash,ctrl+f", "find", "Find", key_display="/"),
+        Binding("n", "next_hit(1)", "Match", key_display="n/N"),
+        Binding("N", "next_hit(-1)", "Previous match", show=False),
+        Binding("question_mark", "keys", "Keys", key_display="?"),
         # [ and ] as well as Alt+arrows, which macOS terminals often send as something else.
         Binding("left_square_bracket,alt+left,backspace", "history_back", "Back/forward", key_display="[]"),
         Binding("right_square_bracket,alt+right", "history_forward", "Forward", show=False),
-        Binding("e,E", "expand_all", "Open/close all", key_display="e/c"),
+        Binding("e,E", "expand_all", "Open all", show=False),
         Binding("c,C", "collapse_all", "Close all", show=False),
         Binding("home,g", "top", "Top", show=False),
         Binding("end,G", "bottom", "Bottom", show=False),
@@ -527,10 +548,18 @@ class DocViewer(App[None]):
         self.latest = latest
         self.history = [place]
         self.at = 0
+        self.found: re.Pattern[str] | None = None
+        """What's being found on the page, if anything."""
+        self.hit = -1
+        """Which of what's found the cursor was last taken to."""
+        self.before: Widget | None = None
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll(id="page")
         yield Static(id="status")
+        with Horizontal(id="find"):
+            yield Input(placeholder="Find on the page", id="find-text")
+            yield Static(id="found")
         yield Footer(compact=True)
 
     async def on_mount(self) -> None:
@@ -555,6 +584,10 @@ class DocViewer(App[None]):
             await self._jump(place.path, returns=place.returns, remember=False)
         elif first := next(iter(self.query(Entry)), None) or next(iter(self.query(Section)), None):
             first.focus(scroll_visible=False)
+        if self.found is not None:
+            await self._mount_all()
+        self.hit = -1
+        self._count()
 
     def _widgets(
         self, loaded: Loaded, plugin: ape.Plugin, docs: ape.PluginDocs | None, latest: str | None
@@ -564,21 +597,21 @@ class DocViewer(App[None]):
         short = as_text(documentation.get("short_description")) or plugin.short_description
         widgets: list[Static | Vertical | Horizontal] = [self._head(loaded, plugin, docs, documentation, short, latest)]
         if docs is None:
-            widgets.append(Static("No documentation.", classes="prose"))
+            widgets.append(_Text(Content("No documentation."), classes="prose"))
             return widgets
         if badges := self._badges(documentation.get("attributes")):
-            widgets.append(Static(badges, classes="prose"))
+            widgets.append(_Text(badges, classes="prose"))
         paragraphs = paragraphs_of(documentation.get("description"))
         if [bare(p) for p in paragraphs] == [bare(short or "")]:
             paragraphs = []
         if paragraphs:
             text = _join(*[_content(rich_text(p)) for p in paragraphs], gap="\n\n")
-            widgets.append(Section("Description", Static(text, classes="prose")))
+            widgets.append(Section("Description", _Text(text, classes="prose")))
 
         if snippets := usage(f"{collection}.{plugin.name}", plugin.type, documentation):
             parts: list[Widget] = []
             for caption, language, code in snippets:
-                caption_line = Static(Content.styled(f"{caption}:", "dim"), classes="caption")
+                caption_line = _Text(Content.styled(f"{caption}:", "dim"), classes="caption")
                 parts += [caption_line, self._code(language, code, classes="under-caption")]
             widgets.append(Section("Usage", *parts))
         inputs, positional, options = split_arguments(plugin.type, documentation)
@@ -600,12 +633,12 @@ class DocViewer(App[None]):
                 text = _join(
                     text, Content.assemble(("Sample: ", "dim"), (yaml_value(value["sample"]), "cyan")), gap="\n\n"
                 )
-            widgets.append(Section("Returns", Static(text, classes="prose")))
+            widgets.append(Section("Returns", _Text(text, classes="prose")))
         elif returns:
             widgets.append(Section("Return values", self._entries(returns, returns=True, section="returns")))
         return widgets
 
-    def _code(self, language: str, code: str, *, classes: str = "prose") -> Static:
+    def _code(self, language: str, code: str, *, classes: str = "prose") -> _Text:
         """Code highlighted with Textual's own highlighting, in the theme's colours and on its background, which
         Rich's Syntax isn't: ``yaml`` examples, ``jinja`` expressions or ``ini`` settings."""
         from textual.highlight import ANSIDarkHighlightTheme, ANSILightHighlightTheme, HighlightTheme, highlight
@@ -613,7 +646,7 @@ class DocViewer(App[None]):
         text = "\n".join(line.rstrip() for line in code.strip("\n").splitlines())
         ansi = ANSILightHighlightTheme if self.light else ANSIDarkHighlightTheme
         lexer = {"yaml": "yaml+jinja", "jinja": "jinja", "shell": "bash"}.get(language, language)
-        return Static(highlight(text, language=lexer, theme=ansi if self.ansi else HighlightTheme), classes=classes)
+        return _Text(highlight(text, language=lexer, theme=ansi if self.ansi else HighlightTheme), classes=classes)
 
     def _head(
         self,
@@ -623,7 +656,7 @@ class DocViewer(App[None]):
         documentation: dict[str, object],
         short: str | None,
         latest: str | None,
-    ) -> Static:
+    ) -> _Text:
         collection = loaded.collection
         lines: list[Content | None] = []
         if short:
@@ -660,7 +693,7 @@ class DocViewer(App[None]):
                     links.append((", ", "dim", None))
                 links.append((other, "plugin", f"{name}#{other}"))
             lines.append(_content(links))
-        head = Static(_join(*lines), id="head")
+        head = _Text(_join(*lines), id="head")
         head.border_title = Content.styled(f"{collection}.{plugin.name}", "bold blue")
         kind = plugin.type
         if plugin.type == "callback" and (callback := as_text(documentation.get("type"))):
@@ -879,3 +912,128 @@ class DocViewer(App[None]):
             chain[target].focus()
         if chain and target == 0:
             self.query_one("#page", VerticalScroll).scroll_home()
+
+    # Finding on the page, and closing what's open.
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # n and N are only in the footer while something's being found.
+        return self.found is not None if action == "next_hit" else True
+
+    def action_find(self) -> None:
+        box = self.query_one("#find-text", Input)
+        if self.focused is not box:
+            self.before = self.focused
+        self.query_one("#find").add_class("-on")
+        box.focus()
+
+    async def on_input_changed(self, event: Input.Changed) -> None:
+        text = event.value
+        # Without case unless what's typed has a capital, as less's and vim's smartcase.
+        self.found = re.compile(re.escape(text), 0 if text != text.lower() else re.IGNORECASE) if text else None
+        self.hit = -1
+        if self.found is not None:
+            await self._mount_all()
+        for widget in self.query(_Text):
+            widget.mark()
+        self._count()
+        self.refresh_bindings()
+
+    async def on_input_submitted(self, _: Input.Submitted) -> None:
+        self._refocus()
+        await self.action_next_hit(1)
+
+    def action_dismiss(self) -> None:
+        """Close the keys, else what's being found, else the viewer."""
+        if self.screen.query(HelpPanel):
+            self.action_hide_help_panel()
+        elif self.query_one("#find").has_class("-on"):
+            self.query_one("#find").remove_class("-on")
+            box = self.query_one("#find-text", Input)
+            if self.focused is box:
+                self._refocus()
+            # Its change clears the marks.
+            box.value = ""
+        else:
+            self.exit()
+
+    def action_keys(self) -> None:
+        if self.screen.query(HelpPanel):
+            self.action_hide_help_panel()
+        else:
+            self.action_show_help_panel()
+
+    def _refocus(self) -> None:
+        chain = self._chain()
+        if self.before is not None and self.before in chain:
+            self.before.focus(scroll_visible=False)
+        elif chain:
+            chain[0].focus(scroll_visible=False)
+
+    async def _mount_all(self) -> None:
+        """Every option, though not opened, so what's in closed ones can be found."""
+        while unmounted := [e for e in self.query(Entry) if not e.mounted and e.kids]:
+            for entry in unmounted:
+                await entry.mount_kids()
+
+    def _hits(self) -> list[tuple[_Text | Entry, int]]:
+        """Where what's being found is, in order, each option it's in, or text and the line of it."""
+        if self.found is None:
+            return []
+        hits: list[tuple[_Text | Entry, int]] = []
+        for text in self.query_one("#page").query(_Text):
+            plain = text.text.plain
+            if isinstance(entry := text.parent, Entry):
+                # Once for the option, whether open or not, as its line loses the description when it opens.
+                if self.found.search(plain) and (not hits or hits[-1][0] is not entry):
+                    hits.append((entry, 0))
+                continue
+            lines = sorted({plain.count("\n", 0, m.start()) for m in self.found.finditer(plain)})
+            hits += [(text, line) for line in lines]
+        return hits
+
+    def _count(self) -> None:
+        count = len(self._hits())
+        if self.found is None:
+            shown = ""
+        elif not count:
+            shown = "no match"
+        elif self.hit >= 0:
+            shown = f"{self.hit + 1}/{count}"
+        else:
+            shown = f"{count} {'match' if count == 1 else 'matches'}"
+        self.query_one("#found", Static).update(shown)
+
+    async def action_next_hit(self, step: int) -> None:
+        """Go to the next or previous place what's being found is, round from the last to the first, opening what
+        it's in."""
+        hits = self._hits()
+        if not hits:
+            self._count()
+            return
+        self.hit = (self.hit + step) % len(hits) if self.hit >= 0 else (0 if step > 0 else len(hits) - 1)
+        hit, line = hits[self.hit]
+        for entry in reversed([a for a in hit.ancestors if isinstance(a, Entry)]):
+            await entry.open()
+        for section in (a for a in hit.ancestors if isinstance(a, Section)):
+            section.action_open()
+        if isinstance(hit, Entry):
+            # Opened if it's only in what opening shows.
+            if not _t.cast("re.Pattern[str]", self.found).search(hit.query_one(".line", _Text).text.plain):
+                await hit.open()
+            hit.focus()
+        else:
+            if owner := next((a for a in hit.ancestors if isinstance(a, (Entry, Section))), None):
+                owner.focus(scroll_visible=False)
+            self.call_after_refresh(self._show_hit, hit, line)
+        self._count()
+
+    def _show_hit(self, text: _Text, line: int) -> None:
+        page = self.query_one("#page", VerticalScroll)
+        # shortcut: counts lines as written, not wrapped, so a match far down a long wrapped paragraph may be a few
+        # lines off the middle. Count wrapped lines if that's ever a bother.
+        y = line
+        widget: Widget = text
+        while widget is not page:
+            y += widget.virtual_region.y
+            widget = _t.cast("Widget", widget.parent)
+        page.scroll_to_region(Region(0, y, 1, 1), center=True, animate=False)
