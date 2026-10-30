@@ -17,6 +17,9 @@ permissions: {}
 
 env:
   UV_VERSION: "0.13.6"
+  # alai and alai-core are built from source, and each one's rust-toolchain.toml makes rustup install that Rust as the
+  # build starts. Built at once, two rustups download into the same directory and fail, so build one at a time.
+  UV_CONCURRENT_BUILDS: "1"
 
 jobs:
   sanity:
