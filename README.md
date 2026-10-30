@@ -41,8 +41,8 @@ alai = { path = "../alai-cli", editable = true }
 
 - Roles and Event-Driven Ansible's plugins are an error, though alai-core
   reads both.
-- Search in the viewer, keyboard links, picking from part of a name or a
-  glob, and Tab completion.
+- Finding a plugin from the viewer, keyboard links, picking from part of a
+  name or a glob, and Tab completion.
 
 ## License
 
