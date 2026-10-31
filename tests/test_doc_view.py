@@ -304,12 +304,111 @@ def test_link_to_another_plugin_at_an_option(project: World) -> None:
     run("ns.coll.thing", steps, types=("module",))
 
 
-def test_link_that_fails(project: World) -> None:
+def test_role_entry_points(project: World) -> None:
     async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        text = screen(app)
+        assert "role ─╯" in text
+        assert "▾ Entry points" in text
+        assert focused(app) == "[Entry points]"
+        assert "• main  Set things up." in text
+        # main open, and the others closed, with the list to open one from.
+        assert "▾ Entry point main" in text
+        assert "thing_name" in text
+        assert "▸ Entry point install" in text
+        # Down to the second entry point, and Enter goes to its section.
+        await settle(pilot, "down", "down")
+        assert app.focused.entry_point == "install"  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
+        assert app.query_one("#status").render().plain == "Entry point install"  # pyright: ignore[reportAttributeAccessIssue]
+        await settle(pilot, "enter")
+        assert focused(app) == "[Entry point install]"
+        # Back to the list, and forward to the section again.
+        await settle(pilot, "left_square_bracket")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert focused(app) == "[Entry points]"
+        await settle(pilot, "right_square_bracket")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert focused(app) == "[Entry point install]"
+        assert "tasks_from: install" in screen(app)
+        assert "tasks_from: install" in screen(app)
+        # Both have a thing_name, and the link goes to the entry point it names.
+        await app.run_action("goto('install:thing_name')")
+        await pilot.pause()
+        assert app.focused.has_class("-flash")  # pyright: ignore[reportOptionalMemberAccess]
+        assert app.focused.entry["description"] == "The thing to install."  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
+
+    run("ns.coll.setup", steps)
+
+
+def test_readme(project: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        messages: list[str] = []
+
+        def notify(message: str, **_: object) -> None:
+            messages.append(message)
+
+        monkeypatch.setattr(app, "notify", notify)
+        text = screen(app)
+        # Its only docs, with nothing to link to.
+        assert "Plain role" in text
+        assert "plain_name" in text
+        assert "See the" not in text
+        # A file in the collection isn't shown.
+        from textual.widgets import Markdown
+
+        app.query_one(Markdown).post_message(Markdown.LinkClicked(app.query_one(Markdown), "defaults/main.yml"))
+        await pilot.pause()
+        assert messages == ["alai-doc doesn't show defaults/main.yml"]
+        await settle(pilot, "slash", *"plain")
+        assert "no match, not in the README" in screen(app)
+
+    run("ns.coll.plain", steps)
+
+
+def test_readme_and_docs(project: World) -> None:
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        assert "See the README" in screen(app)
+        assert "More about solo" not in screen(app)
+        await app.run_action("show_readme(True)")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        text = screen(app)
+        assert "More about solo" in text
+        assert "See the documentation" in text
+        assert "count" not in text
+        assert app.query_one("#status").render().plain == "README"  # pyright: ignore[reportAttributeAccessIssue]
+        await settle(pilot, "left_square_bracket")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert focused(app) == "count"
+
+    run("ns.coll.solo", steps)
+
+
+def test_find_in_closed_entry_points(project: World) -> None:
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        # Only the install entry point has this, and its section starts closed.
+        await settle(pilot, "slash", *"thing to install", "enter")
+        assert focused(app) == "thing_name"
+        assert app.focused.entry["description"] == "The thing to install."  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
+        assert "▾ Entry point install" in screen(app)
+
+    run("ns.coll.setup", steps)
+
+
+def test_link_that_fails(project: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        messages: list[str] = []
+
+        def notify(message: str, **_: object) -> None:
+            messages.append(message)
+
+        monkeypatch.setattr(app, "notify", notify)
         await app.run_action("open_plugin('no.such.plugin')")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert [n.message for n in app._notifications] == ["no index has the collection no.such"]
+        assert messages == ["no index has the collection no.such"]
         # Still where it was, with nothing in history to go forward to.
         assert app.history[app.at].fqcn == "ns.coll.thing"
         assert len(app.history) == 1

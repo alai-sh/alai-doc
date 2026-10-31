@@ -27,19 +27,22 @@ from ._doc_model import (
     bare,
     deprecation_text,
     entries_under,
+    entry_points,
     load,
     nested_entries,
     origin_text,
     paragraphs_of,
+    readme,
     rich_text,
     split_arguments,
+    summary,
     type_name,
     unnamed_return,
     usage,
     yaml_value,
 )
 from ._markup import Segment, and_list, as_sentence, markup
-from ._output import warn
+from ._output import home_path, warn
 
 if _t.TYPE_CHECKING:
     from alai_core import extract as ape
@@ -81,7 +84,9 @@ def markdown(loaded: Loaded, latest: str | None) -> str:
 
 def _plugin(loaded: Loaded, plugin: ape.Plugin, docs: ape.PluginDocs | None, latest: str | None) -> list[str]:
     collection = loaded.collection
-    documentation = as_map(docs.documentation) if docs is not None else {}
+    parts = entry_points(plugin, docs, loaded.located) if docs is not None else []
+    # A role's header is its main entry point's, and a role without one has only its name.
+    documentation = as_map(parts[0][1].documentation) if parts and parts[0][0] in (None, "main") else {}
     short = as_text(documentation.get("short_description")) or plugin.short_description
     out = [f"# {_escape(f'{collection}.{plugin.name}')}", ""]
     if short:
@@ -109,46 +114,80 @@ def _plugin(loaded: Loaded, plugin: ape.Plugin, docs: ape.PluginDocs | None, lat
         facts.append(
             f"Not shown: what the doc {what} {names} {verb}, which couldn't be found or read without running code"
         )
+    found = readme(loaded)
+    if found is not None and docs is not None:
+        facts.append(f"README: {_escape(home_path(str(found[0])))}")
     out += [f"- {fact}" for fact in facts] + [""]
     if docs is None:
-        return [*out, "No documentation.", ""]
+        # A role without argument specs has its README, as Markdown already.
+        return [*out, found[1].strip("\n") if found is not None else "No documentation.", ""]
+    # Any other entry point is under its name, as include_role needs it.
+    if len(parts) == 1 and parts[0][0] in (None, "main"):
+        return out + _body(f"{collection}.{plugin.name}", plugin.type, *parts[0], short, "##")
+    # Without links, as each renderer makes a heading's anchor its own way.
+    out += ["## Entry points", ""]
+    for entry, part, usable in parts:
+        said = summary(as_map(part.documentation))
+        line = f"- `{entry}`" + (f" · {_inline(as_sentence(markup(said)))}" if said else "")
+        out.append(line + ("" if usable else " (documentation only)"))
+    out.append("")
+    for entry, part, usable in parts:
+        part_short = as_text(as_map(part.documentation).get("short_description"))
+        out += [f"## Entry point `{entry}`" if usable else f"## `{entry}`, documentation only", ""]
+        if part_short:
+            out += [_inline(as_sentence(markup(part_short))), ""]
+        out += _body(f"{collection}.{plugin.name}", plugin.type, entry, part, usable, part_short, "###")
+    return out
 
-    out += _attributes(documentation.get("attributes"))
+
+def _body(
+    fqcn: str,
+    plugin_type: str,
+    entry: str | None,
+    docs: ape.PluginDocs,
+    usable: bool,
+    short: str | None,
+    level: str,
+) -> list[str]:
+    """What's under a plugin's header, or a role entry point's, its sections' headings at ``level``, with no usage for
+    one that can't be used."""
+    documentation = as_map(docs.documentation)
+    out = _attributes(documentation.get("attributes"))
     paragraphs = paragraphs_of(documentation.get("description"))
     # Many plugins repeat the short description as the whole description.
     if [bare(p) for p in paragraphs] != [bare(short or "")]:
         for paragraph in paragraphs:
             out += [_paragraph(paragraph), ""]
 
-    snippets = usage(f"{collection}.{plugin.name}", plugin.type, documentation)
+    snippets = usage(fqcn, plugin_type, documentation, entry) if usable else []
     if snippets:
-        out += ["## Usage", ""]
+        out += [f"{level} Usage", ""]
         for caption, language, code in snippets:
             out += [f"{_escape(caption)}:", "", f"```{language}", code, "```", ""]
-    inputs, positional, options = split_arguments(plugin.type, documentation)
+    inputs, positional, options = split_arguments(plugin_type, documentation)
     for title, entries in (("Input", inputs), ("Positional", positional), ("Options", options)):
         if entries:
-            out += [f"## {title}", "", *_entries(entries, 0, None, returns=False)]
+            out += [f"{level} {title}", "", *_entries(entries, 0, None, returns=False)]
     for title, key in (("Notes", "notes"), ("Requirements", "requirements")):
         if items := paragraphs_of(documentation.get(key)):
-            out += [f"## {title}", "", *[f"- {_paragraph(i)}" for i in items], ""]
+            out += [f"{level} {title}", "", *[f"- {_paragraph(i)}" for i in items], ""]
     if seealso := _seealso(documentation.get("seealso")):
-        out += ["## See also", "", *seealso, ""]
+        out += [f"{level} See also", "", *seealso, ""]
     if docs.examples and docs.examples.strip():
         code = "\n".join(line.rstrip() for line in docs.examples.strip("\n").splitlines())
         fence = "```" if "```" not in code else "~~~~"
-        out += ["## Examples", "", f"{fence}yaml", code, fence, ""]
+        out += [f"{level} Examples", "", f"{fence}yaml", code, fence, ""]
     returns = entries_under({"returns": docs.returns}, "returns")
-    if (value := unnamed_return(plugin.type, returns)) is not None:
+    if (value := unnamed_return(plugin_type, returns)) is not None:
         # The type, then what it is, as the first paragraph's start.
         described = paragraphs_of(value.get("description")) or [""]
         first = f"`{type_name(value)}`" + (f" · {_paragraph(described[0])}" if described[0] else "")
-        out += ["## Returns", "", first, ""]
+        out += [f"{level} Returns", "", first, ""]
         for paragraph in described[1:]:
             out += [_paragraph(paragraph), ""]
         out += _returned(value)
     elif returns:
-        out += ["## Return values", "", *_entries(returns, 0, None, returns=True)]
+        out += [f"{level} Return values", "", *_entries(returns, 0, None, returns=True)]
     return out
 
 

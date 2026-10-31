@@ -192,9 +192,74 @@ def test_connection_usage(world: World, capsys: pytest.CaptureFixture[str]) -> N
     assert "```ini\n[defaults]\ntransport = ns.coll.tunnel\n```" in text
 
 
-def test_not_shown_yet(world: World, capsys: pytest.CaptureFixture[str]) -> None:
-    assert doc("ns.coll.setup") == EXIT_ERROR
-    assert capsys.readouterr().err == "error: ns.coll.setup is a role, and alai-doc doesn't show roles yet\n"
+def test_role(world: World, capsys: pytest.CaptureFixture[str]) -> None:
+    assert doc("ns.coll.solo") == 0
+    text = "\n".join(out(capsys))
+    assert text.startswith("# ns.coll.solo\n\nDo one thing.\n\n- Type: role\n")
+    # Its README is a page of its own, so only where it is.
+    assert f"- README: {world.root}/ns.coll/roles/solo/README.md\n" in text.replace("\\_", "_")
+    # With no doc fragments to apply, ansible.builtin isn't looked for.
+    assert [r for r in world.runs() if "ansible.builtin" in r] == []
+    assert "## Usage\n\nIn a task:\n\n```yaml\n- ansible.builtin.include_role:\n    name: ns.coll.solo\n```" in text
+    assert text.endswith("## Options\n\n- **count** · `int`\n\n  How many.")
+    # Only main, so no list of entry points.
+    assert "Entry point" not in text
+
+
+def test_role_readme(world: World, capsys: pytest.CaptureFixture[str]) -> None:
+    """A role without argument specs has its README, as written, under the header."""
+    assert doc("ns.coll.plain") == 0
+    text = "\n".join(out(capsys))
+    assert text.startswith("# ns.coll.plain\n\n- Type: role\n")
+    assert "README:" not in text
+    assert text.endswith(
+        "\n\nPlain role\n==========\n\nSets up the plain thing, see [the guide](https://e.com/guide) or "
+        + "[defaults](defaults/main.yml).\n\n## Variables\n\n| Variable | Default |\n|---|---|\n| `plain_name` | `plain` |"
+    )
+
+
+def test_role_entry_points(world: World, capsys: pytest.CaptureFixture[str]) -> None:
+    """Each entry point under its own heading, main first, as include_role runs each."""
+    assert doc("ns.coll.setup") == 0
+    text = "\n".join(out(capsys))
+    assert text.startswith("# ns.coll.setup\n\nSet things up.\n\n- Type: role\n")
+    assert "- Authors: Someone\n" in text
+    assert "## Entry points\n\n- `main` · Set things up.\n- `install` · Install the thing.\n\n## Entry point" in text
+    main, install = text.split("## Entry point `main`\n\n")[1].split("## Entry point `install`\n\n")
+    assert "- ansible.builtin.include_role:\n    name: ns.coll.setup\n  vars:\n    thing_name: <str>\n" in main
+    # O(install:version) as the option it names.
+    assert "### Options\n\n- **thing_name** · `str` · required\n\n  The thing, or **version** to install it." in main
+    # With no short description, the list has the description's first paragraph, and the section all of it.
+    assert install.startswith("Install the thing.\n\nThen start it.\n\n### Usage")
+    assert "    name: ns.coll.setup\n    tasks_from: install\n```" in install
+    assert "- **version** · `str` · default `latest`" in install
+
+
+def test_role_without_main(world: World, capsys: pytest.CaptureFixture[str]) -> None:
+    """With no main entry point, the header is only the role's name, and the entry points are in the role's order.
+    One with no task file comes last, as documentation only, with no usage."""
+    assert doc("ns.coll.tools") == 0
+    text = "\n".join(out(capsys))
+    assert text.startswith("# ns.coll.tools\n\n- Type: role\n")
+    assert "- `zap/all` · Remove everything.\n- `build` · Build it. (documentation only)\n" in text
+    zap, build = text.split("## Entry point `zap/all`\n\n")[1].split("## `build`, documentation only\n\n")
+    assert zap.startswith("Remove everything.\n\n### Usage")
+    assert "    tasks_from: zap/all\n" in zap
+    assert build == "Build it."
+
+
+def test_event_source(world: World, capsys: pytest.CaptureFixture[str]) -> None:
+    assert doc("ns.coll.hook") == 0
+    text = "\n".join(out(capsys))
+    assert "- Type: event_source" in text
+    assert "In a rulebook:\n\n```yaml\nsources:\n  - ns.coll.hook:\n      port: <int>\n```" in text
+    assert text.endswith("## Options\n\n- **port** · `int` · required\n\n  The port.")
+
+
+def test_event_filter(world: World, capsys: pytest.CaptureFixture[str]) -> None:
+    assert doc("ns.coll.tidy") == 0
+    text = "\n".join(out(capsys))
+    assert "```yaml\nsources:\n  - <source>:\n    filters:\n      - ns.coll.tidy:\n```" in text
 
 
 def test_more_than_one_type(world: World, capsys: pytest.CaptureFixture[str]) -> None:
@@ -478,5 +543,5 @@ def test_markup() -> None:
         ("c", "code", None),
         (".", None, None),
     ]
-    assert markup("O(main:name)", role=True) == [("name", "option_name", "main:name")]
+    assert markup("O(main:name)") == [("name", "option_name", "main:name")]
     assert markup("broken C(here") == [("broken ", None, None), ("C(here", None, None)]

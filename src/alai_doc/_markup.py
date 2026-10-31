@@ -34,16 +34,17 @@ _MARKUP = frozenset(
 """alai-core's kinds that are markup, rather than plain text, an error's text or a horizontal line."""
 
 
-def markup(text: str, *, role: bool = False) -> list[Segment]:
+def markup(text: str) -> list[Segment]:
     """A description split at Ansible's documentation markup, each piece the text it shows: ``C()``, ``B()`` and
     ``I()`` their text, ``M(fqcn)`` and ``P(fqcn#type)`` the name, ``L(text,url)`` and ``R(text,anchor)`` the text,
     ``U(url)`` the URL, ``O()`` and ``RV()`` the option or return value (and ``=value``) without the plugin, entry
     point or ``ignore:`` before it, and ``V()`` and ``E()`` their value. ``HORIZONTALLINE`` is dropped, and markup
-    that isn't well formed is left as written. ``role`` is for a role's argument specs."""
+    that isn't well formed is left as written."""
     from alai_core.markup import parse
 
     out: list[Segment] = []
-    for part in parse(text, role=role):
+    # As a role's, as O(entrypoint:name) is an error anywhere else.
+    for part in parse(text, role=True):
         kind = part.kind
         if kind not in _MARKUP:
             # text, or an error's markup as written. horizontal_line has no text.

@@ -278,11 +278,54 @@ ROLE_SPEC = b"""
 argument_specs:
   main:
     short_description: Set things up.
+    author: Someone
     options:
       thing_name:
         type: str
         required: true
-        description: The thing.
+        description: The thing, or O(install:version) to install it.
+  install:
+    description:
+      - Install the thing.
+      - Then start it.
+    options:
+      thing_name:
+        type: str
+        description: The thing to install.
+      version:
+        type: str
+        default: latest
+        description: Which version.
+"""
+
+README = b"""Plain role
+==========
+
+Sets up the plain thing, see [the guide](https://e.com/guide) or [defaults](defaults/main.yml).
+
+## Variables
+
+| Variable | Default |
+|---|---|
+| `plain_name` | `plain` |
+"""
+
+TOOLS_SPEC = b"""
+argument_specs:
+  build:
+    short_description: Build it.
+  zap/all:
+    short_description: Remove everything.
+"""
+
+SOLO_SPEC = b"""
+argument_specs:
+  main:
+    short_description: Do one thing.
+    options:
+      count:
+        type: int
+        description: How many.
 """
 
 EVENT_SOURCE = '''
@@ -294,6 +337,17 @@ options:
     description: The port.
     type: int
     required: true
+"""
+'''
+
+EVENT_FILTER = '''
+DOCUMENTATION = r"""
+short_description: Tidy event keys.
+options:
+  overwrite:
+    description: Whether to replace a key.
+    type: bool
+    default: true
 """
 '''
 
@@ -357,7 +411,16 @@ def collection(root: Path, version: str, *, lookup: bool = True) -> Path:
         "plugins/connection/tunnel.py": CONNECTION,
         "roles/setup/meta/argument_specs.yml": ROLE_SPEC,
         "roles/setup/tasks/main.yml": b"- ansible.builtin.debug: {}\n",
+        "roles/setup/tasks/install.yml": b"- ansible.builtin.debug: {}\n",
+        "roles/solo/meta/argument_specs.yml": SOLO_SPEC,
+        "roles/solo/tasks/main.yml": b"- ansible.builtin.debug: {}\n",
+        "roles/solo/README.md": b"# Solo\n\nMore about solo.\n",
+        "roles/plain/tasks/main.yml": b"- ansible.builtin.debug: {}\n",
+        "roles/plain/README.md": README,
+        "roles/tools/meta/argument_specs.yml": TOOLS_SPEC,
+        "roles/tools/tasks/zap/all.yaml": b"- ansible.builtin.debug: {}\n",
         "extensions/eda/plugins/event_source/hook.py": EVENT_SOURCE,
+        "extensions/eda/plugins/event_filter/tidy.py": EVENT_FILTER,
     }
     if lookup:
         files["plugins/lookup/thing.py"] = LOOKUP
