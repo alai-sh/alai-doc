@@ -338,15 +338,21 @@ class Entry(Vertical, can_focus=True):
         if not self.query(".detail") and self._detail().plain:
             await self.mount(_Text(self._detail(), classes="detail"), after=self.query_one(".line", _Text))
         await self.mount_kids()
+        # Opening makes the page taller, so it's laid out once it is.
+        height = None if self.is_open else self.screen.query_one("#page", VerticalScroll).virtual_size.height
         self.is_open = True
         self.add_class("-open")
         self.query_one(".line", _Text).show(self._line())
         # What opened is below the line, and may be below the screen: once it's laid out, bring it into view, its line
         # kept on screen if it's taller than the screen.
-        self.call_after_refresh(self._show_opened)
+        self.call_after_refresh(self._show_opened, height)
 
-    def _show_opened(self) -> None:
+    def _show_opened(self, height: int | None, tries: int = 3) -> None:
         page = self.screen.query_one("#page", VerticalScroll)
+        # A refresh doesn't promise the page is laid out yet. One that isn't shown, as in a closed parent, never is.
+        if tries and self.region and page.virtual_size.height == height:
+            self.call_after_refresh(self._show_opened, height, tries - 1)
+            return
         self.scroll_visible(animate=False, top=self.region.height > page.region.height)
 
     def close(self) -> None:
