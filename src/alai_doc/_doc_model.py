@@ -13,6 +13,7 @@ import difflib
 import json
 import re
 import typing as _t
+from pathlib import Path
 
 from ._alai import BUILTIN, DOWNLOADED, EDA_BUILTIN, INSTALLED, LEGACY, LOCKED, PROJECT, Alai, Located
 from ._common import Error, Record
@@ -22,12 +23,6 @@ from ._output import debug, home_path
 if _t.TYPE_CHECKING:
     from alai_core import extract as ape
 
-_NOT_SHOWN = {
-    "role": ("a role", "roles"),
-    "event_source": ("an event source", "Event-Driven Ansible's plugins"),
-    "event_filter": ("an event filter", "Event-Driven Ansible's plugins"),
-}
-"""The types alai-doc doesn't show yet, as what one is and what they are, for the error saying so."""
 _UNDOCUMENTED = frozenset(("action", "terminal"))
 """The types extraction finds that ansible-doc has no ``-t`` for: an action plugin backs a module of the same name, and
 a terminal plugin is used through a cliconf one."""
@@ -126,20 +121,16 @@ def load(alai: Alai, name: str, types: _c.Sequence[str] = ()) -> Loaded:
         if names := _suggestions(alai, asked, types):
             raise NotFound(f"{searched} has no plugin {asked}{kind}; did you mean {or_list(names)}?")
         raise NotFound(f"{searched} has no plugin {asked}{kind}; alai find {asked} searches every collection for one")
-    shown = {k: v for k, v in chosen.items() if k not in _NOT_SHOWN}
-    if not shown:
-        what = _NOT_SHOWN[next(iter(chosen))]
-        raise Error(f"{asked} is {what[0]}, and alai-doc doesn't show {what[1]} yet")
-    if len(shown) > 1:
-        raise Error(_conflict(asked, {k: (h.name, d) for k, (h, d) in shown.items()}))
-    [(kind, (hop, _))] = shown.items()
-    others = [(k, f"{h.name}.{short}") for k, (h, _) in found.items() if k != kind and k not in _NOT_SHOWN]
+    if len(chosen) > 1:
+        raise Error(_conflict(asked, {k: (h.name, d) for k, (h, d) in chosen.items()}))
+    [(kind, (hop, _))] = chosen.items()
+    others = [(k, f"{h.name}.{short}") for k, (h, _) in found.items() if k != kind]
     return _follow(alai, hop, short, kind, others)
 
 
 def _check_index(alai: Alai, name: str, types: _c.Sequence[str]) -> None:
     """Fail as ``load`` would, without downloading the collection: if no index's plugin index has ``name``, or none
-    of ``types``, or only types alai-doc doesn't show, or more than one type and no ``types`` to choose. Nothing, if
+    of ``types``, or more than one type and no ``types`` to choose. Nothing, if
     there's no plugin index to tell. Only to check a name before downloading, as what a page shows comes from the
     collection itself."""
     lines = alai.find(name, exact=True)
@@ -163,12 +154,8 @@ def _check_index(alai: Alai, name: str, types: _c.Sequence[str]) -> None:
         close = [f"{collection}.{n}" for n in difflib.get_close_matches(short, sorted(names), n=3)]
         also = f"; did you mean {or_list(close)}?" if close else ""
         raise NotFound(f"no index has a plugin {name}{kind}{also}")
-    shown = {k: v for k, v in chosen.items() if k not in _NOT_SHOWN}
-    if not shown:
-        what = _NOT_SHOWN[next(iter(chosen))]
-        raise Error(f"{name} is {what[0]}, and alai-doc doesn't show {what[1]} yet")
-    if len(shown) > 1:
-        raise Error(_conflict(name, shown))
+    if len(chosen) > 1:
+        raise Error(_conflict(name, chosen))
 
 
 def _suggestions(alai: Alai, short: str, types: _c.Sequence[str], most: int = 3) -> list[str]:
@@ -292,6 +279,9 @@ def _fragment_sources(alai: Alai, extracted: ape.Collection, plugins: list[ape.P
     plugin's docs aren't whole without them. One that can't be found, or fetched offline, is left out, and the page
     says what isn't shown."""
     sources = [extracted]
+    if not any(p.docs is not None and (p.docs.fragments or p.docs.return_fragments) for p in plugins):
+        # Nothing to apply, so no collection to find, as roles and many plugins have none.
+        return sources
     own = f"{extracted.namespace}.{extracted.name}"
     wanted = {
         ".".join(f.split(".")[:2])
@@ -413,6 +403,55 @@ def rich_text(text: str) -> list[Segment]:
     return [s for s in out if s[0]]
 
 
+def entry_points(
+    plugin: ape.Plugin, docs: ape.PluginDocs, located: Located
+) -> list[tuple[str | None, ape.PluginDocs, bool]]:
+    """What a page shows: for a role, each entry point's argument spec as docs of its own, ``main`` first and the rest
+    as the role lists them, and for anything else its docs, with no entry point. Each says whether it can be used,
+    which an entry point can't if its role has no task file for it. Those come last, as they're shared options or
+    notes rather than something to run."""
+    if plugin.type != "role" or not docs.entry_points:
+        return [(None, docs, True)]
+    from alai_core import extract as ape
+
+    specs = as_map(docs.entry_points)
+    # meta/argument_specs.yml, so tasks is beside meta.
+    tasks = Path(located.path, docs.path).parent.parent / "tasks" if docs.path else None
+
+    def usable(name: str) -> bool:
+        # As include_role finds tasks_from, with or without an extension. Some roles document things other than
+        # task files as entry points, such as __examples__.
+        return name == "main" or tasks is None or any(tasks.joinpath(name + e).exists() for e in _TASK_EXTENSIONS)
+
+    parts = [(name, ape.PluginDocs(documentation=as_map(specs[name])), usable(name)) for name in specs]
+    return sorted(parts, key=lambda p: (p[0] != "main", not p[2]))
+
+
+_TASK_EXTENSIONS = ("", ".yml", ".yaml", ".json")
+"""What ansible-core's ``Role._load_role_yaml`` tries after a task file's name."""
+
+
+def readme(loaded: Loaded) -> tuple[Path, str] | None:
+    """A role's ``README.md`` and what's in it, which Galaxy shows for a role and alai-core doesn't read: for most
+    roles their only docs. None for anything else, or if it can't be read."""
+    plugin = loaded.plugins[0][0]
+    if plugin.type != "role":
+        return None
+    path = Path(loaded.located.path, "roles", plugin.name, "README.md")
+    try:
+        return path, path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def summary(documentation: dict[str, object]) -> str:
+    """What a role entry point does, for the list of them: its short description, else its description's first
+    paragraph, as a few roles give only that."""
+    return as_text(documentation.get("short_description")) or next(
+        iter(paragraphs_of(documentation.get("description"))), ""
+    )
+
+
 def bare(text: str) -> str:
     """Text to compare, without case, surrounding space or a full stop."""
     return text.strip().rstrip(".").lower()
@@ -496,15 +535,28 @@ def _placeholder(option: dict[str, object]) -> str:
     return "<list>" if kind.startswith("list") else f"<{kind}>"
 
 
-def usage(fqcn: str, plugin_type: str, documentation: dict[str, object]) -> list[Snippet]:
+def usage(
+    fqcn: str, plugin_type: str, documentation: dict[str, object], entry_point: str | None = None
+) -> list[Snippet]:
     """How the plugin is used, each way a short example with its required arguments as placeholders; none for a type
-    with no one way to use it. The settings and variables are ansible-core's, from ``config/base.yml``."""
+    with no one way to use it. The settings and variables are ansible-core's, from ``config/base.yml``. A role's is
+    for its ``entry_point``."""
     inputs, positional, options = split_arguments(plugin_type, documentation)
     required = {n: o for n, o in options.items() if o.get("required") is True}
     yaml_args = [f"{n}: {_placeholder(o)}" for n, o in required.items() if n != "plugin"]
     keywords = [f"{n}={_placeholder(o)}" for n, o in required.items()]
     if plugin_type == "module":
         return [("In a task", "yaml", "\n".join([f"- {fqcn}:", *[f"    {a}" for a in yaml_args]]))]
+    if plugin_type == "role":
+        tasks_from = [f"    tasks_from: {entry_point}"] if entry_point not in (None, "main") else []
+        role_vars = ["  vars:", *[f"    {a}" for a in yaml_args]] if yaml_args else []
+        code = "\n".join(["- ansible.builtin.include_role:", f"    name: {fqcn}", *tasks_from, *role_vars])
+        return [("In a task", "yaml", code)]
+    if plugin_type == "event_source":
+        return [("In a rulebook", "yaml", "\n".join(["sources:", f"  - {fqcn}:", *[f"      {a}" for a in yaml_args]]))]
+    if plugin_type == "event_filter":
+        code = "\n".join(["sources:", "  - <source>:", "    filters:", f"      - {fqcn}:"])
+        return [("In a rulebook", "yaml", "\n".join([code, *[f"          {a}" for a in yaml_args]]))]
     if plugin_type == "lookup":
         args = ", ".join([f"<{n}>" for n in positional] + keywords)
         return [("In a template or expression", "jinja", f"{{{{ lookup('{fqcn}'{', ' + args if args else ''}) }}}}")]

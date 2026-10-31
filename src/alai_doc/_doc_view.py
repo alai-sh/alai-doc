@@ -9,6 +9,7 @@ Textual is imported only here, so the Markdown output never pays for it.
 
 from __future__ import annotations
 
+import asyncio
 import collections.abc as _c
 import json
 import re
@@ -21,8 +22,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
 from textual.geometry import Region
 from textual.style import Style
-from textual.widget import Widget
-from textual.widgets import Footer, HelpPanel, Input, Static
+from textual.widget import AwaitMount, Widget
+from textual.widgets import Footer, HelpPanel, Input, Markdown, Static
 
 from . import _output
 from ._alai import BUILTIN
@@ -38,14 +39,17 @@ from ._doc_model import (
     bare,
     deprecation_text,
     entries_under,
+    entry_points,
     input_label,
     load,
     nested_entries,
     origin_text,
     paragraphs_of,
     path_segment,
+    readme,
     rich_text,
     split_arguments,
+    summary,
     type_name,
     unnamed_return,
     usage,
@@ -70,6 +74,8 @@ _STYLES = {
     "module": "blue",
     "plugin": "blue",
     "link": "blue",
+    "entry_point": "blue",
+    "page": "blue",
     "url": "blue",
     "dim": "dim",
     "warn": "yellow",
@@ -88,15 +94,28 @@ _MARK = "reverse"
 
 
 class _Place(Record):
-    """Somewhere in the viewer's history: a plugin, and the option or return value to show in it, if any."""
+    """Somewhere in the viewer's history: a plugin, and the option or return value to show in it, if any, with the
+    role entry point it's in."""
 
-    __slots__ = ("fqcn", "path", "returns", "types")
+    __slots__ = ("entry_point", "fqcn", "path", "readme", "returns", "types")
 
-    def __init__(self, fqcn: str, types: tuple[str, ...], path: tuple[str, ...] = (), *, returns: bool = False) -> None:
+    def __init__(
+        self,
+        fqcn: str,
+        types: tuple[str, ...],
+        path: tuple[str, ...] = (),
+        *,
+        returns: bool = False,
+        entry_point: str | None = None,
+        readme: bool = False,
+    ) -> None:
         self.fqcn = fqcn
         self.types = types
         self.path = path
         self.returns = returns
+        self.entry_point = entry_point
+        self.readme = readme
+        """A role's README, a page of its own, rather than its docs."""
 
 
 def view(alai: Alai, loaded: Loaded) -> int:
@@ -128,6 +147,10 @@ def _content(segments: _c.Iterable[Segment]) -> Content:
             action = f"app.open_plugin({(target if kind == 'plugin' else target + '#module')!r})"
         elif target and kind in ("link", "url"):
             action = f"app.open_link({target!r})"
+        elif target and kind == "entry_point":
+            action = f"app.show_entry_point({target!r})"
+        elif target and kind == "page":
+            action = f"app.show_readme({target == 'readme'})"
         if action:
             style = style + Style(underline=True) + Style.from_meta({"@click": action})
         parts.append((text.replace(NBSP, " "), style))
@@ -144,6 +167,8 @@ class _Text(Static):
     def __init__(self, text: Content, *, classes: str | None = None, id: str | None = None) -> None:  # noqa: A002
         super().__init__(text, classes=classes, id=id)
         self.text = text
+        self.marked = False
+        """Whether what's being found is marked in it."""
 
     def on_mount(self) -> None:
         # Mounted while something's being found, as an option's children are when it opens.
@@ -152,11 +177,20 @@ class _Text(Static):
 
     def show(self, text: Content) -> None:
         self.text = text
+        self.marked = False
+        self.update(text)
         self.mark()
 
     def mark(self) -> None:
         found = _t.cast("DocViewer", self.app).found
-        self.update(self.text.highlight_regex(found, style=_MARK) if found is not None else self.text)
+        hit = found is not None and found.search(self.text.plain) is not None
+        # Most text has nothing to mark, before or after. Updating it anyway lays out the whole page again.
+        if not hit and not self.marked:
+            return
+        self.marked = hit
+        shown = self.text.highlight_regex(found, style=_MARK) if found is not None and hit else self.text
+        # Marking only styles it, so its size is the same.
+        self.update(shown, layout=False)
 
 
 class Entry(Vertical, can_focus=True):
@@ -210,12 +244,22 @@ class Entry(Vertical, can_focus=True):
         self.parent_name = parent
         self.kids = nested_entries(entry, returns=returns)
         self.mounted = False
+        """Whether its children are mounted, which they're only once it's opened or the page is searched."""
         self.is_open = False
+        self._detail_text: Content | None = None
 
     def compose(self) -> ComposeResult:
+        # Only the line, as most are never opened: the detail and children are mounted when it is.
         yield _Text(self._line(), classes="line")
-        yield _Text(self._detail(), classes="detail")
-        yield Vertical(classes="children")
+
+    def kid_entries(self) -> list[Entry]:
+        """Its children, once mounted."""
+        return [c for c in self.query_one(".children").children if isinstance(c, Entry)] if self.mounted else []
+
+    def search_text(self) -> str:
+        """What finding on the page looks in, whether it's open or not, as its line loses the description when it
+        opens."""
+        return f"{self.query_one('.line', _Text).text.plain}\n{self._detail().plain}"
 
     def _line(self) -> Content:
         """The collapsed line: name, type, whether it's required, the default, and the description's start."""
@@ -240,6 +284,11 @@ class Entry(Vertical, can_focus=True):
 
     def _detail(self) -> Content:
         """Everything about it, for when it's open: the whole description and the rest."""
+        if self._detail_text is None:
+            self._detail_text = self._build_detail()
+        return self._detail_text
+
+    def _build_detail(self) -> Content:
         entry = self.entry
         blocks: list[Content | None] = [_content(rich_text(p)) for p in paragraphs_of(entry.get("description"))]
         if self.returns:
@@ -270,11 +319,14 @@ class Entry(Vertical, can_focus=True):
 
     async def mount_kids(self) -> None:
         """Its children, mounted the first time it opens, or when the page is searched."""
-        if not self.mounted:
+        if not self.mounted and self.kids:
             self.mounted = True
             parent = self.option
             column = _columns(self.kids, parent, returns=self.returns)
-            await self.query_one(".children", Vertical).mount_all(
+            children = Vertical(classes="children")
+            await self.mount(children)
+            # Into it once it's mounted, so they are too when this returns.
+            await children.mount_all(
                 Entry(n, e, self.path, crumbs=self.crumbs, column=column, returns=self.returns, parent=parent)
                 for n, e in self.kids.items()
             )
@@ -282,6 +334,9 @@ class Entry(Vertical, can_focus=True):
     async def open(self) -> None:
         if not self.kids and not self._detail().plain:
             return
+        # The detail goes after the line, before any children searching mounted.
+        if not self.query(".detail") and self._detail().plain:
+            await self.mount(_Text(self._detail(), classes="detail"), after=self.query_one(".line", _Text))
         await self.mount_kids()
         self.is_open = True
         self.add_class("-open")
@@ -333,6 +388,16 @@ class Entry(Vertical, can_focus=True):
         self.scroll_visible(animate=False)
 
 
+class _Entries(Vertical):
+    """A section's options or return values, and which they are: ``options``, ``returns`` and so on, in a role's
+    ``entry_point`` if it's one's."""
+
+    def __init__(self, *entries: Entry, section: str, entry_point: str | None, id: str) -> None:  # noqa: A002
+        super().__init__(*entries, classes="entries", id=id)
+        self.section = section
+        self.entry_point = entry_point
+
+
 class Section(Vertical, can_focus=True):
     """A part of the page under a heading, open to start with, which closes to just its heading."""
 
@@ -356,14 +421,27 @@ class Section(Vertical, can_focus=True):
         Binding("left,h", "close", "Close", show=False),
     ]
 
-    def __init__(self, title: str, *body: Widget) -> None:
-        super().__init__()
+    def __init__(self, title: str, *body: Widget, entry_point: str | None = None, closed: bool = False) -> None:
+        super().__init__(classes="-closed" if closed else None)
         self.title = title
         self.body = body
+        self.entry_point = entry_point
+        """The role entry point the section is, if it's one."""
+        self.lazy = closed
+        """Whether its body waits to be mounted until it's opened, or needed, as one that starts closed does."""
+        self._mounting: AwaitMount | None = None
 
     def compose(self) -> ComposeResult:
         yield Static(self._heading(), classes="heading")
-        yield Vertical(*self.body, classes="body")
+        yield Vertical(*(() if self.lazy else self.body), classes="body")
+
+    async def mount_body(self) -> None:
+        """Its body, mounted if it waits to be, for what needs what's in it: links to it, and finding."""
+        # Not once it's gone, as a page left before it's all mounted is.
+        if self.lazy and self.is_attached:
+            if self._mounting is None:
+                self._mounting = self.query_one(".body", Vertical).mount_all(self.body)
+            await self._mounting
 
     def _heading(self) -> Content:
         marker = "▸ " if self.has_class("-closed") else "▾ "
@@ -371,6 +449,8 @@ class Section(Vertical, can_focus=True):
         return Content.assemble((marker, "dim"), (self.title, "bold"), (" " + "─" * 400, "dim"))
 
     def _set(self, *, closed: bool) -> None:
+        if not closed and self.lazy and self._mounting is None:
+            self._mounting = self.query_one(".body", Vertical).mount_all(self.body)
         self.set_class(closed, "-closed")
         self.query_one(".heading", Static).update(self._heading())
 
@@ -421,6 +501,40 @@ class _Bullet(Horizontal):
     def compose(self) -> ComposeResult:
         yield Static("•", classes="mark")
         yield _Text(self.text, classes="text")
+
+
+class _EntryPointItem(_Bullet, can_focus=True):
+    """A role entry point in the list at the top of its page, which up and down move to as they do options, and
+    Enter goes to."""
+
+    DEFAULT_CSS = """
+    _EntryPointItem { margin-left: 0; border-left: blank; }
+    _EntryPointItem:focus { border-left: outer $primary; background: $boost; }
+    _EntryPointItem:focus > .text { text-style: bold; }
+    """
+    BINDINGS: _t.ClassVar = [
+        Binding("down,j", "move(1)", "Next", show=False),
+        Binding("home,g", "app.top", "Top", show=False),
+        Binding("end,G", "app.bottom", "Bottom", show=False),
+        Binding("up,k", "move(-1)", "Previous", show=False),
+        Binding("enter,space,right,l", "follow", "Go to"),
+        Binding("pageup,left_curly_bracket", "app.section(-1)", "Previous section", show=False),
+        Binding("pagedown,right_curly_bracket", "app.section(1)", "Next section", show=False),
+    ]
+
+    def __init__(self, text: Content, entry_point: str) -> None:
+        super().__init__(text)
+        self.entry_point = entry_point
+
+    def action_move(self, step: int) -> None:
+        _t.cast("DocViewer", self.app).move(step)
+
+    def action_follow(self) -> None:
+        _t.cast("DocViewer", self.app).action_show_entry_point(self.entry_point)
+
+    def on_focus(self) -> None:
+        self.app.query_one("#status", Static).update(Content.styled(f"Entry point {self.entry_point}", "dim"))
+        self.scroll_visible(animate=False)
 
 
 def _flag(entry: dict[str, object], parent: str | None, *, returns: bool) -> list[tuple[str, str]]:
@@ -501,11 +615,14 @@ class DocViewer(App[None]):
     """One plugin's documentation at a time, with history."""
 
     TITLE = "alai-doc"
+    # Each page focuses what it starts on. Focusing the page first would restyle all of it when that moves on.
+    AUTO_FOCUS = None
     CSS = """
     #page { height: 1fr; padding: 0 1; }
     #head { height: auto; border: round $foreground 50%; padding: 0 1; max-width: 108; }
     Screen.-ansi #head { border: round ansi_bright_black; }
     .prose { height: auto; max-width: 104; margin: 1 0 0 1; }
+    .readme { max-width: 108; margin: 1 0 0 0; }
     .caption { height: auto; max-width: 104; margin: 1 0 0 1; }
     .under-caption { height: auto; max-width: 104; margin: 0 0 0 3; }
     .entries { height: auto; }
@@ -577,28 +694,101 @@ class DocViewer(App[None]):
         )
         page = self.query_one("#page", VerticalScroll)
         await page.remove_children()
-        await page.mount_all(self._widgets(loaded, plugin, docs, latest))
+        await page.mount_all(self._widgets(loaded, plugin, docs, latest, readme_page=place.readme))
         self.sub_title = f"{loaded.collection}.{plugin.name}"
         page.scroll_home(animate=False)
         if place.path:
-            await self._jump(place.path, returns=place.returns, remember=False)
-        elif first := next(iter(self.query(Entry)), None) or next(iter(self.query(Section)), None):
+            await self._jump(place.path, returns=place.returns, entry_point=place.entry_point, remember=False)
+        elif place.entry_point:
+            self.action_show_entry_point(place.entry_point, remember=False)
+        # A role's list of entry points, else the first option, else the first heading.
+        elif first := (
+            next(iter(self.query("#entry-points")), None)
+            or next(iter(self.query(Entry)), None)
+            or next(iter(self.query(Section)), None)
+        ):
             first.focus(scroll_visible=False)
+        else:
+            # A README, which the page's own keys scroll, and the status line says it's what's shown.
+            page.focus(scroll_visible=False)
+            self.query_one("#status", Static).update(Content.styled("README" if self.query(Markdown) else "", "dim"))
         if self.found is not None:
             await self._mount_all()
         self.hit = -1
         self._count()
+        # Shown, what's in closed sections is mounted after, a section at a time, so finding has it ready.
+        self.run_worker(self._mount_sections(), group="sections", exclusive=True)
 
     def _widgets(
-        self, loaded: Loaded, plugin: ape.Plugin, docs: ape.PluginDocs | None, latest: str | None
-    ) -> list[Static | Vertical | Horizontal]:
-        collection = loaded.collection
-        documentation = as_map(docs.documentation) if docs is not None else {}
+        self,
+        loaded: Loaded,
+        plugin: ape.Plugin,
+        docs: ape.PluginDocs | None,
+        latest: str | None,
+        *,
+        readme_page: bool = False,
+    ) -> list[Widget]:
+        fqcn = f"{loaded.collection}.{plugin.name}"
+        parts = entry_points(plugin, docs, loaded.located) if docs is not None else []
+        # A role's header is its main entry point's, and a role without one has only its name.
+        documentation = as_map(parts[0][1].documentation) if parts and parts[0][0] in (None, "main") else {}
         short = as_text(documentation.get("short_description")) or plugin.short_description
-        widgets: list[Static | Vertical | Horizontal] = [self._head(loaded, plugin, docs, documentation, short, latest)]
+        found = readme(loaded)
+        # The README and the docs are pages of their own, each linking to the other, when a role has both.
+        other = None if found is None or docs is None else "docs" if readme_page else "readme"
+        widgets: list[Widget] = [self._head(loaded, plugin, docs, documentation, short, latest, other)]
+        if found is not None and (readme_page or docs is None):
+            # Links are followed here, as only some can be.
+            widgets.append(Markdown(found[1], open_links=False, classes="readme"))
+            return widgets
         if docs is None:
             widgets.append(_Text(Content("No documentation."), classes="prose"))
             return widgets
+        # Any other entry point is under its name, as include_role needs it.
+        if len(parts) == 1 and parts[0][0] in (None, "main"):
+            return widgets + self._body(fqcn, plugin.type, *parts[0], short)
+        # Each entry point, linked to its section.
+        listed: list[Widget] = []
+        for entry, part, usable in parts:
+            said = summary(as_map(part.documentation))
+            segments: list[Segment] = [(entry or "", "entry_point", entry)]
+            if said:
+                segments += [("  ", None, None), *as_sentence(markup(said))]
+            if not usable:
+                segments.append(("  documentation only", "dim", None))
+            listed.append(_EntryPointItem(_content(segments), entry or ""))
+        listing = Section("Entry points", *listed)
+        listing.id = "entry-points"
+        widgets.append(listing)
+        for entry, part, usable in parts:
+            part_short = as_text(as_map(part.documentation).get("short_description"))
+            body: list[Widget] = []
+            if part_short:
+                body.append(_Text(_content(as_sentence(markup(part_short))), classes="prose"))
+            section = Section(
+                f"Entry point {entry}" if usable else f"{entry}, documentation only",
+                *body,
+                *self._body(fqcn, plugin.type, entry, part, usable, part_short),
+                entry_point=entry,
+                # main open, as what the role runs by default, and the rest closed, with the list above to open one
+                # from: a role can have dozens.
+                closed=entry != "main",
+            )
+            widgets.append(section)
+        return widgets
+
+    def _body(
+        self,
+        fqcn: str,
+        plugin_type: str,
+        entry: str | None,
+        docs: ape.PluginDocs,
+        usable: bool,
+        short: str | None,
+    ) -> list[Static | Vertical | Horizontal]:
+        """What's under a plugin's header, or a role entry point's, with no usage for one that can't be used."""
+        documentation = as_map(docs.documentation)
+        widgets: list[Static | Vertical | Horizontal] = []
         if badges := self._badges(documentation.get("attributes")):
             widgets.append(_Text(badges, classes="prose"))
         paragraphs = paragraphs_of(documentation.get("description"))
@@ -608,16 +798,17 @@ class DocViewer(App[None]):
             text = _join(*[_content(rich_text(p)) for p in paragraphs], gap="\n\n")
             widgets.append(Section("Description", _Text(text, classes="prose")))
 
-        if snippets := usage(f"{collection}.{plugin.name}", plugin.type, documentation):
+        if usable and (snippets := usage(fqcn, plugin_type, documentation, entry)):
             parts: list[Widget] = []
             for caption, language, code in snippets:
                 caption_line = _Text(Content.styled(f"{caption}:", "dim"), classes="caption")
                 parts += [caption_line, self._code(language, code, classes="under-caption")]
             widgets.append(Section("Usage", *parts))
-        inputs, positional, options = split_arguments(plugin.type, documentation)
+        inputs, positional, options = split_arguments(plugin_type, documentation)
         for title, entries in (("Input", inputs), ("Positional", positional), ("Options", options)):
             if entries:
-                widgets.append(Section(title, self._entries(entries, returns=False, section=title.lower())))
+                box = self._entries(entries, returns=False, section=title.lower(), entry_point=entry)
+                widgets.append(Section(title, box))
         for title, key in (("Notes", "notes"), ("Requirements", "requirements")):
             if items := paragraphs_of(documentation.get(key)):
                 widgets.append(Section(title, *[_Bullet(_content(rich_text(i))) for i in items]))
@@ -626,7 +817,7 @@ class DocViewer(App[None]):
         if docs.examples and docs.examples.strip():
             widgets.append(Section("Examples", self._code("yaml", docs.examples)))
         returns = entries_under({"returns": docs.returns}, "returns")
-        if (value := unnamed_return(plugin.type, returns)) is not None:
+        if (value := unnamed_return(plugin_type, returns)) is not None:
             described = [_content(rich_text(p)) for p in paragraphs_of(value.get("description"))]
             text = _join(Content.styled(type_name(value), "magenta"), *described, gap="\n\n")
             if value.get("sample") is not None:
@@ -635,7 +826,8 @@ class DocViewer(App[None]):
                 )
             widgets.append(Section("Returns", _Text(text, classes="prose")))
         elif returns:
-            widgets.append(Section("Return values", self._entries(returns, returns=True, section="returns")))
+            box = self._entries(returns, returns=True, section="returns", entry_point=entry)
+            widgets.append(Section("Return values", box))
         return widgets
 
     def _code(self, language: str, code: str, *, classes: str = "prose") -> _Text:
@@ -656,6 +848,7 @@ class DocViewer(App[None]):
         documentation: dict[str, object],
         short: str | None,
         latest: str | None,
+        other: str | None = None,
     ) -> _Text:
         collection = loaded.collection
         lines: list[Content | None] = []
@@ -685,6 +878,10 @@ class DocViewer(App[None]):
                     "yellow",
                 )
             )
+        # The README, or back from it to the docs.
+        if other is not None:
+            shown = "README" if other == "readme" else "documentation"
+            lines.append(_content([("See the ", "dim", None), (shown, "page", other)]))
         # The other types of plugin the name asked for is: a lookup as well as a module, say.
         if loaded.others:
             links: list[Segment] = [("Also a ", "dim", None)]
@@ -756,15 +953,16 @@ class DocViewer(App[None]):
             lines.append(_content(segments))
         return lines
 
-    def _entries(self, entries: dict[str, dict[str, object]], *, returns: bool, section: str) -> Vertical:
+    def _entries(
+        self, entries: dict[str, dict[str, object]], *, returns: bool, section: str, entry_point: str | None
+    ) -> _Entries:
         column = _columns(entries, None, returns=returns)
-        box = Vertical(
+        return _Entries(
             *[Entry(n, e, (), column=column, returns=returns, parent=None) for n, e in entries.items()],
-            classes="entries",
-            id=re.sub(r"[^a-z0-9_-]", "-", f"section-{section}"),
+            section=section,
+            entry_point=entry_point,
+            id=re.sub(r"[^a-z0-9_-]", "-", f"section-{entry_point or ''}-{section}".replace("--", "-")),
         )
-        box.section = section  # pyright: ignore[reportAttributeAccessIssue]
-        return box
 
     # Following links.
 
@@ -777,14 +975,14 @@ class DocViewer(App[None]):
             kind, _, target = rest.partition(":")
             if not target:
                 target, kind = kind, ""
-        elif ":" in target:
-            target = target.rsplit(":", 1)[1]
+        entry_point, _, target = target.rpartition(":")
+        entry_point = entry_point or None
         path = tuple(part.removesuffix("[]") for part in target.split(".") if part)
         current = self.history[self.at]
         if fqcn is not None and (fqcn != current.fqcn or (kind and kind not in current.types)):
-            self._visit(_Place(fqcn, (kind,) if kind else (), path, returns=returns))
+            self._visit(_Place(fqcn, (kind,) if kind else (), path, returns=returns, entry_point=entry_point))
             return
-        await self._jump(path, returns=returns)
+        await self._jump(path, returns=returns, entry_point=entry_point)
 
     def action_open_plugin(self, target: str) -> None:
         fqcn, _, kind = target.partition("#")
@@ -793,9 +991,46 @@ class DocViewer(App[None]):
     def action_open_link(self, url: str) -> None:
         self.open_url(url)
 
-    async def _jump(self, path: tuple[str, ...], *, returns: bool, remember: bool = True) -> None:
-        """Open every option on ``path`` and focus the last, briefly highlighted."""
-        sections = [w for w in self.query(".entries") if (getattr(w, "section", "") == "returns") == returns]
+    def action_show_readme(self, readme: bool) -> None:
+        """Go to the role's README, or back from it to its docs, as a page of its own in history."""
+        current = self.history[self.at]
+        self._visit(_Place(current.fqcn, current.types, readme=readme))
+
+    def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
+        """A README's link: a URL opens in the browser, and a heading is gone to. A file in the collection isn't
+        shown, so says so."""
+        href = event.href
+        if href.startswith(("http://", "https://")):
+            self.open_url(href)
+        elif href.startswith("#"):
+            event.markdown.goto_anchor(href[1:])
+        else:
+            self.notify(f"alai-doc doesn't show {href}", severity="warning")
+
+    def action_show_entry_point(self, entry_point: str, *, remember: bool = True) -> None:
+        """Open a role entry point's section and bring its heading to the top, as a place in history."""
+        section = next(s for s in self.query(Section) if s.entry_point == entry_point)
+        if remember:
+            current = self.history[self.at]
+            self.history[self.at + 1 :] = [_Place(current.fqcn, current.types, entry_point=entry_point)]
+            self.at += 1
+        section.action_open()
+        section.focus(scroll_visible=False)
+        # Once laid out, which a page just shown from history isn't yet.
+        page = self.query_one("#page", VerticalScroll)
+        self.call_after_refresh(page.scroll_to_widget, section, top=True, animate=False)
+
+    async def _jump(
+        self, path: tuple[str, ...], *, returns: bool, entry_point: str | None = None, remember: bool = True
+    ) -> None:
+        """Open every option on ``path``, in a role's ``entry_point`` if it's given, and focus the last, briefly
+        highlighted."""
+        await self._mount_sections(entry_point)
+        sections = [
+            w
+            for w in self.query(_Entries)
+            if (w.section == "returns") == returns and entry_point in (None, w.entry_point)
+        ]
         entries = [c for s in sections for c in s.children if isinstance(c, Entry)]
         found: Entry | None = None
         for i, name in enumerate(path):
@@ -808,7 +1043,7 @@ class DocViewer(App[None]):
                 return
             if i < len(path) - 1:
                 await found.open()
-                entries = [c for c in found.query_one(".children").children if isinstance(c, Entry)]
+                entries = found.kid_entries()
         if found is None:
             return
         for ancestor in found.ancestors:
@@ -816,7 +1051,9 @@ class DocViewer(App[None]):
                 ancestor.action_open()
         if remember:
             current = self.history[self.at]
-            self.history[self.at + 1 :] = [_Place(current.fqcn, current.types, path, returns=returns)]
+            self.history[self.at + 1 :] = [
+                _Place(current.fqcn, current.types, path, returns=returns, entry_point=entry_point)
+            ]
             self.at += 1
         found.focus()
         found.add_class("-flash")
@@ -862,12 +1099,12 @@ class DocViewer(App[None]):
     # Opening and closing everything, and scrolling.
 
     async def action_expand_all(self) -> None:
+        await self._mount_sections()
         for section in self.query(Section):
             section.action_open()
-        # Children are only mounted once open, so a level at a time.
+        # Children are only mounted once open, so a level at a time, each level's together so it's laid out once.
         while closed := [e for e in self.query(Entry) if not e.is_open and (e.kids or e._detail().plain)]:
-            for entry in closed:
-                await entry.open()
+            await asyncio.gather(*(entry.open() for entry in closed))
 
     def action_collapse_all(self) -> None:
         for entry in self.query(Entry):
@@ -885,8 +1122,9 @@ class DocViewer(App[None]):
         self.query_one("#page", VerticalScroll).scroll_end()
 
     def _chain(self) -> list[Widget]:
-        """What up and down move between, in order: the sections' headings and the options they show."""
-        return [w for w in self.screen.focus_chain if isinstance(w, (Entry, Section))]
+        """What up and down move between, in order: the sections' headings, the options they show and a role's
+        entry points."""
+        return [w for w in self.screen.focus_chain if isinstance(w, (Entry, Section, _EntryPointItem))]
 
     def action_section(self, step: int) -> None:
         """Move to the next section's heading, or back to the heading of the section the cursor is in, then the one
@@ -971,24 +1209,33 @@ class DocViewer(App[None]):
 
     async def _mount_all(self) -> None:
         """Every option, though not opened, so what's in closed ones can be found."""
+        await self._mount_sections()
         while unmounted := [e for e in self.query(Entry) if not e.mounted and e.kids]:
             for entry in unmounted:
                 await entry.mount_kids()
+
+    async def _mount_sections(self, entry_point: str | None = None) -> None:
+        """What's in the sections that wait to be opened to mount it, those of role ``entry_point``, or all of them."""
+        for section in list(self.query(Section)):
+            if entry_point is None or section.entry_point == entry_point:
+                await section.mount_body()
 
     def _hits(self) -> list[tuple[_Text | Entry, int]]:
         """Where what's being found is, in order, each option it's in, or text and the line of it."""
         if self.found is None:
             return []
         hits: list[tuple[_Text | Entry, int]] = []
-        for text in self.query_one("#page").query(_Text):
-            plain = text.text.plain
-            if isinstance(entry := text.parent, Entry):
-                # Once for the option, whether open or not, as its line loses the description when it opens.
-                if self.found.search(plain) and (not hits or hits[-1][0] is not entry):
-                    hits.append((entry, 0))
+        for widget in self.query_one("#page").walk_children():
+            if isinstance(widget, Entry):
+                # Once for the option.
+                if self.found.search(widget.search_text()):
+                    hits.append((widget, 0))
                 continue
+            if not isinstance(widget, _Text) or isinstance(widget.parent, Entry):
+                continue
+            plain = widget.text.plain
             lines = sorted({plain.count("\n", 0, m.start()) for m in self.found.finditer(plain)})
-            hits += [(text, line) for line in lines]
+            hits += [(widget, line) for line in lines]
         return hits
 
     def _count(self) -> None:
@@ -1001,6 +1248,8 @@ class DocViewer(App[None]):
             shown = f"{self.hit + 1}/{count}"
         else:
             shown = f"{count} {'match' if count == 1 else 'matches'}"
+        if self.found is not None and self.query(Markdown):
+            shown += ", not in the README"
         self.query_one("#found", Static).update(shown)
 
     async def action_next_hit(self, step: int) -> None:
