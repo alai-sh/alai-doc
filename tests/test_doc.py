@@ -317,6 +317,25 @@ def test_checked_before_downloading(world: World, capsys: pytest.CaptureFixture[
     assert "--no-download" in runs[0]
 
 
+def test_installed_located_once(world: World, capsys: pytest.CaptureFixture[str]) -> None:
+    """An installed collection is where asking whether it's on disk said, so alai isn't run again to locate it. A
+    cached one is, for its latest version."""
+    assert world.collections["ns.coll"] is not None
+    world.collections["ns.coll"]["origin"] = "installed"
+    world.save()
+    assert doc("-t", "module", "ns.coll.thing") == 0
+    asked = [r for r in world.runs() if r[:2] == ["collection", "path"] and "ns.coll" in r]
+    assert len(asked) == 1
+    assert "--no-download" in asked[0]
+
+
+def test_cached_located_again(world: World, capsys: pytest.CaptureFixture[str]) -> None:
+    assert doc("-t", "module", "ns.coll.thing") == 0
+    asked = [r for r in world.runs() if r[:2] == ["collection", "path"] and "ns.coll" in r]
+    assert len(asked) == 2
+    assert "--no-download" not in asked[-1]
+
+
 def test_fragment_not_found(world: World, capsys: pytest.CaptureFixture[str]) -> None:
     del world.collections["other.coll"]
     world.on_disk.discard("other.coll")

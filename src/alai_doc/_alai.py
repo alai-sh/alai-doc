@@ -93,6 +93,9 @@ class Alai:
         if name not in self._on_disk:
             found = self._collection_path([name], download=False).get(name)
             self._on_disk[name] = isinstance(found, Located)
+            # These are found the same with a download, so locate needn't ask again. A cached one would lack latest.
+            if isinstance(found, Located) and found.origin in (PROJECT, INSTALLED, LOCKED):
+                self._located[name] = found
         return self._on_disk[name]
 
     def read(self, located: Located) -> ape.Collection:
