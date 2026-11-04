@@ -865,7 +865,7 @@ class DocViewer(App[None]):
             lines.append(Content(f"Redirected from {and_list(loaded.redirects)}."))
         origin = origin_text(loaded.located)
         if latest:
-            origin = f"{origin.rstrip('.')}; {latest} is the latest."
+            origin = f"{origin.rstrip('.')}, but {latest} is the latest."
         lines.append(Content.styled(origin, "dim"))
         if authors := paragraphs_of(documentation.get("author")):
             lines.append(Content.styled(f"By {and_list(authors)}.", "dim"))

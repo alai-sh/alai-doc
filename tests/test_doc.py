@@ -32,7 +32,7 @@ def test_module(world: World, capsys: pytest.CaptureFixture[str]) -> None:
         "Manage things.",
         "",
         "- Type: module",
-        "- Version: ns.coll 2.0.0, from the cache; 3.0.0 is the latest.",
+        "- Version: ns.coll 2.0.0, from the cache, but 3.0.0 is the latest.",
         "- Authors: Someone (@someone)",
         "- Added in: ns.coll 1.0.0",
         "",
@@ -288,7 +288,7 @@ def test_short_name_not_found(world: World, capsys: pytest.CaptureFixture[str]) 
     # Ranked as alai find ranks them, without the removed one.
     assert doc("tunnel") == EXIT_NOT_FOUND
     assert capsys.readouterr().err == (
-        "warning: ansible.builtin has no plugin tunnel; did you mean 'ns.coll.tunnel' or 'fork.coll.tunnel'?\n"
+        "error: ansible.builtin has no plugin tunnel, did you mean 'ns.coll.tunnel' or 'fork.coll.tunnel'\n"
     )
 
 
@@ -302,7 +302,7 @@ def test_short_name_in_a_collection_project(world: World, capsys: pytest.Capture
 
 def test_tombstone(world: World, capsys: pytest.CaptureFixture[str]) -> None:
     assert doc("gone") == EXIT_NOT_FOUND
-    assert capsys.readouterr().err == "warning: ansible.builtin.gone was removed: Use ns.coll.thing instead.\n"
+    assert capsys.readouterr().err == "error: ansible.builtin.gone was removed: Use ns.coll.thing instead.\n"
 
 
 def test_checked_before_downloading(world: World, capsys: pytest.CaptureFixture[str]) -> None:
@@ -310,7 +310,7 @@ def test_checked_before_downloading(world: World, capsys: pytest.CaptureFixture[
     world.on_disk.discard("ns.coll")
     world.save()
     assert doc("ns.coll.thingy") == EXIT_NOT_FOUND
-    assert capsys.readouterr().err == "warning: no index has a plugin ns.coll.thingy; did you mean 'ns.coll.thing'?\n"
+    assert capsys.readouterr().err == "error: no index has a plugin ns.coll.thingy, did you mean 'ns.coll.thing'\n"
     # Asked whether it's on disk, then the plugin index; never told to download it.
     runs = world.runs()
     assert [r[0] for r in runs] == ["collection", "find", "find"]

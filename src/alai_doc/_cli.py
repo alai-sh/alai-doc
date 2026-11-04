@@ -42,7 +42,7 @@ def main(argv: _c.Sequence[str] | None = None) -> int:
 
     alai = Alai(_alai_args(args))
     try:
-        return doc(alai, args.name, types=args.types, output_format=args.output_format)
+        return doc(alai, args.name, types=[args.type] if args.type else [], output_format=args.output_format)
     except Error as e:
         _output.error(str(e))
         return EXIT_ERROR
@@ -81,11 +81,8 @@ def _parser() -> argparse.ArgumentParser:
         "-t",
         "--type",
         metavar="TYPE",
-        dest="types",
-        action="append",
-        default=[],
-        help="only this type, as ansible-doc -t names them (module, lookup, filter...), for a name more than one "
-        + "type has, and can be repeated",
+        help="the plugin's type, as ansible-doc -t names them (module, lookup, filter...), for a name more than one "
+        + "type has",
     )
     parser.add_argument(
         "--output-format",
