@@ -98,20 +98,20 @@ def test_page(project: World) -> None:
         assert "check_mode ✓   diff_mode ◐   platform posix" in text
         # The first option has the cursor; each is a line, with required and the default in words.
         assert focused(app) == "mode"
-        assert "▸ name       str         required" in text
-        assert "▸ state      str         = present" in text
+        assert "[+] name       str         required" in text
+        assert "[+] state      str         = present" in text
         assert app.theme == "textual-dark"
         assert app.sub_title == "ns.coll.thing"
         assert "⏎ Open/close ⇥ Tab q Quit / Find ? Keys [] Back/forward" in text
         # Usage, examples and return values are each a tab, which Tab and Shift+Tab go round.
         assert " Docs  Usage  Examples  Returns" in text
-        assert "▾ Usage" not in text
+        assert "[-] Usage" not in text
         await settle(pilot, "tab")
         text = screen(app)
         assert focused(app) == "[Usage]"
         assert "In a task:" in text
         assert "- ns.coll.thing:" in text
-        assert "▾ Options" not in text
+        assert "[-] Options" not in text
         # The header is on every tab.
         assert "╭─ ns.coll.thing ─" in text
         # Round from the first to the last, which starts at its first return value.
@@ -217,18 +217,18 @@ def test_open_and_close(project: World) -> None:
         assert focused(app) == "mode_kind"
         text = screen(app)
         # Open, it has all of it: the default whole, choices with descriptions.
-        assert "▾ mode_kind" in text
+        assert "[-] mode_kind" in text
         assert "Default: slow" in text
         assert "• fast: Quickly." in text
         await settle(pilot, "left")
-        assert "▸ mode_kind" in screen(app)
+        assert "[+] mode_kind" in screen(app)
         await settle(pilot, "down", "down", "down", "right", "down")
         # rules' children are mounted when it's opened, and the cursor goes into them.
         assert focused(app) == "rules.match"
         assert "required in rules" in screen(app)
         await settle(pilot, "left", "left")
         assert focused(app) == "rules"
-        assert "▸ rules" in screen(app)
+        assert "[+] rules" in screen(app)
         await settle(pilot, "e")
         assert opened(app) >= {"rules", "rules.match", "rules.match.conditions", "rules.match.conditions.field"}
         await settle(pilot, "c")
@@ -286,7 +286,7 @@ def test_sections_close(project: World) -> None:
     async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
         await settle(pilot, "home", "enter")
         text = screen(app)
-        assert "▸ Description" in text
+        assert "[+] Description" in text
         assert "Manages a thing on the host." not in text
         await pilot.click("Section .heading")
         await pilot.pause()
@@ -299,7 +299,7 @@ def test_click_opens(project: World) -> None:
     async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
         await pilot.click("Entry .line")
         await pilot.pause()
-        assert "▾ mode" in screen(app)
+        assert "[-] mode" in screen(app)
 
     run("ns.coll.thing", steps, types=("module",))
 
@@ -328,7 +328,7 @@ def test_links_and_history(project: World) -> None:
         await pilot.pause()
         text = screen(app)
         assert "lookup ─╯" in text
-        assert "▾ Positional" in text
+        assert "[-] Positional" in text
         assert " Docs  Usage  Returns" in text
         await settle(pilot, "tab")
         assert "{{ lookup('ns.coll.thing', <terms>, endpoint=<str>) }}" in screen(app)
@@ -363,13 +363,13 @@ def test_role_entry_points(project: World) -> None:
     async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
         text = screen(app)
         assert "role ─╯" in text
-        assert "▾ Entry points" in text
+        assert "[-] Entry points" in text
         assert focused(app) == "[Entry points]"
         assert "• main  Set things up." in text
         # main open, and the others closed, with the list to open one from.
-        assert "▾ Entry point main" in text
+        assert "[-] Entry point main" in text
         assert "thing_name" in text
-        assert "▸ Entry point install" in text
+        assert "[+] Entry point install" in text
         # Down to the second entry point, and Enter goes to its section.
         await settle(pilot, "down", "down")
         assert app.focused.entry_point == "install"  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
@@ -448,7 +448,7 @@ def test_find_in_closed_entry_points(project: World) -> None:
         await settle(pilot, "slash", *"thing to install", "enter")
         assert focused(app) == "thing_name"
         assert app.focused.entry["description"] == "The thing to install."  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
-        assert "▾ Entry point install" in screen(app)
+        assert "[-] Entry point install" in screen(app)
 
     run("ns.coll.setup", steps)
 
@@ -485,8 +485,8 @@ def test_opened_when_it_fits(project: World, rows: int, expected: set[str]) -> N
 def test_filter(project: World) -> None:
     async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
         text = screen(app)
-        assert "▾ Input" in text
-        assert "▾ input  raw  required" in text
+        assert "[-] Input" in text
+        assert "[-] input  raw  required" in text
         await settle(pilot, "tab")
         assert "{{ <input> | ns.coll.double(<times>, sep=<str>) }}" in screen(app)
 

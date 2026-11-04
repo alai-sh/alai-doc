@@ -272,10 +272,10 @@ class Entry(Vertical, can_focus=True):
     def _line(self) -> Content:
         """The collapsed line: name, type, whether it's required, the default, and the description's start."""
         expandable = bool(self.kids) or bool(self._detail().plain)
-        marker = ("▾ " if self.is_open else "▸ ") if expandable else "  "
+        marker = ("[-] " if self.is_open else "[+] ") if expandable else "    "
         names, types, flags = self.column
         parts: list[tuple[str, str | Style]] = [
-            (marker, "dim"),
+            (marker, ""),
             (self.option.ljust(names), "bold"),
             ("  ", ""),
             (type_name(self.entry).ljust(types), "$text-secondary"),
@@ -460,9 +460,9 @@ class Section(Vertical, can_focus=True):
             await self._mounting
 
     def _heading(self) -> Content:
-        marker = "▸ " if self.has_class("-closed") else "▾ "
+        marker = "[+] " if self.has_class("-closed") else "[-] "
         # As the printed page's rules; cut to the width.
-        return Content.assemble((marker, "dim"), (self.title, "bold"), (" " + "─" * 400, "dim"))
+        return Content.assemble((marker, ""), (self.title, "bold $primary"), (" " + "─" * 400, "dim"))
 
     def _set(self, *, closed: bool) -> None:
         if not closed and self.lazy and self._mounting is None:
