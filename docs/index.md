@@ -18,12 +18,16 @@ $ alai-doc win_copy
 $ alai-doc community.general.json_query --output-format markdown
 ```
 
-[Opening an option, then the examples and return values](casts/overview.cast){ .cli-cast }
+[Opening an option, then the other tabs](casts/overview.cast){ .cli-cast .cli-cast-schemes }
 
 The viewer opens on a module with each option folded to a single line.
-Pressing Enter on `name` opens it, and `}` jumps from section to section
-through to the examples and return values.
+Pressing Enter on `name` opens it, and `Tab` moves through the usage,
+examples and return values, which each have a tab of their own.
 {: .cli-cast-description }
+
+The recordings show a terminal with 24-bit color and a dark background. How
+the viewer looks on another terminal depends on the colors it shows and its
+background, as [Colors](reading.md#colors) covers.
 
 alai-doc does not need the collection to be installed. It asks
 [alai](https://docs.alai.sh/) where the collection is, which is the project
@@ -50,15 +54,15 @@ applied.
 
 Role documentation comes from the role's argument spec in
 `meta/argument_specs.yml`, its `README.md`, or both. When a role has both, the
-argument spec is shown first with a link to the README. When a role has only a
-README, the README is shown. A role with neither is shown as having no
-documentation.
+argument spec is shown first and the README is in a tab after it. When a role
+has only a README, the README is shown. A role with neither is shown as having
+no documentation.
 
-[A role's entry points, then its README](casts/role-readme.cast){ .cli-cast }
+[A role's entry points, then its README](casts/role-readme.cast){ .cli-cast .cli-cast-schemes }
 
 The role's entry points are listed first, and pressing Enter on `configure`
-goes to the options it takes. Clicking "See the README" in the header opens
-the README, and `[` goes back to where the docs were left.
+goes to the options it takes. Pressing `Tab` shows the README, and pressing it
+again goes back to the docs.
 {: .cli-cast-description }
 
 ## Where to go next

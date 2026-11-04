@@ -23,7 +23,7 @@ from textual.content import Content
 from textual.geometry import Region
 from textual.style import Style
 from textual.widget import AwaitMount, Widget
-from textual.widgets import Footer, HelpPanel, Input, Markdown, Static
+from textual.widgets import Footer, HelpPanel, Input, Markdown, Static, Tab, Tabs
 
 from . import _output
 from ._alai import BUILTIN
@@ -59,6 +59,7 @@ from ._markup import and_list, as_sentence, markup
 
 if _t.TYPE_CHECKING:
     from alai_core import extract as ape
+    from textual.theme import Theme
 
     from ._alai import Alai
     from ._markup import Segment
@@ -66,38 +67,40 @@ if _t.TYPE_CHECKING:
 _STYLES = {
     "bold": "bold",
     "italic": "italic",
-    "code": "cyan",
-    "option_value": "cyan",
-    "env_var": "cyan",
+    "code": "$text-success",
+    "option_value": "$text-success",
+    "env_var": "$text-success",
     "option_name": "bold",
     "return_value": "bold",
-    "module": "blue",
-    "plugin": "blue",
-    "link": "blue",
-    "entry_point": "blue",
-    "page": "blue",
-    "url": "blue",
+    "module": "$text-primary",
+    "plugin": "$text-primary",
+    "link": "$text-primary",
+    "entry_point": "$text-primary",
+    "url": "$text-primary",
     "dim": "dim",
-    "warn": "yellow",
-    "support-full": "green",
-    "support-partial": "yellow",
-    "support-none": "red",
+    "warn": "$text-warning",
+    "support-full": "$text-success",
+    "support-partial": "$text-warning",
+    "support-none": "$text-error",
     "support-N/A": "dim",
 }
-"""How each piece of a line is styled, as the plain page styles it."""
+"""How each piece of a line is styled, as the plain page styles it. The theme's variables are looked up as it's
+drawn, so a line follows the theme when it changes."""
 _MAX_COLUMN = 28
 """The widest the names in a group of options make their column; a longer name pushes its own line along."""
 _MAX_FLAG = 24
 """The widest a default is shown on a collapsed line; the whole of it is in the detail."""
 _MARK = "reverse"
 """How what's being found is marked on the page."""
+_TABS = {"docs": "Docs", "usage": "Usage", "examples": "Examples", "returns": "Returns", "readme": "README"}
+"""The page's tabs, in order, each shown only when the plugin has something for it."""
 
 
 class _Place(Record):
     """Somewhere in the viewer's history: a plugin, and the option or return value to show in it, if any, with the
     role entry point it's in."""
 
-    __slots__ = ("entry_point", "fqcn", "path", "readme", "returns", "types")
+    __slots__ = ("entry_point", "fqcn", "path", "returns", "types")
 
     def __init__(
         self,
@@ -107,15 +110,12 @@ class _Place(Record):
         *,
         returns: bool = False,
         entry_point: str | None = None,
-        readme: bool = False,
     ) -> None:
         self.fqcn = fqcn
         self.types = types
         self.path = path
         self.returns = returns
         self.entry_point = entry_point
-        self.readme = readme
-        """A role's README, a page of its own, rather than its docs."""
 
 
 def view(alai: Alai, loaded: Loaded) -> int:
@@ -136,9 +136,10 @@ def view(alai: Alai, loaded: Loaded) -> int:
 
 def _content(segments: _c.Iterable[Segment]) -> Content:
     """A line's pieces as Textual content: markup styled, and links to plugins, options and URLs clickable."""
-    parts: list[tuple[str, Style]] = []
+    parts: list[Content] = []
     for text, kind, target in segments:
-        style = Style.parse(_STYLES[kind]) if kind in _STYLES else Style()
+        # A string, not a parsed Style, which would fix the theme's colours as they are now.
+        piece = Content.styled(text.replace(NBSP, " "), _STYLES.get(kind or "", ""))
         action = None
         if target and kind in ("option_name", "return_value"):
             action = f"app.goto({target!r}, {kind == 'return_value'})"
@@ -149,11 +150,9 @@ def _content(segments: _c.Iterable[Segment]) -> Content:
             action = f"app.open_link({target!r})"
         elif target and kind == "entry_point":
             action = f"app.show_entry_point({target!r})"
-        elif target and kind == "page":
-            action = f"app.show_readme({target == 'readme'})"
         if action:
-            style = style + Style(underline=True) + Style.from_meta({"@click": action})
-        parts.append((text.replace(NBSP, " "), style))
+            piece = piece.stylize(Style(underline=True) + Style.from_meta({"@click": action}))
+        parts.append(piece)
     return Content.assemble(*parts)
 
 
@@ -191,6 +190,15 @@ class _Text(Static):
         shown = self.text.highlight_regex(found, style=_MARK) if found is not None and hit else self.text
         # Marking only styles it, so its size is the same.
         self.update(shown, layout=False)
+
+
+class _Code(_Text):
+    """Highlighted code, kept as written so it can be highlighted again for another theme."""
+
+    def __init__(self, text: Content, language: str, code: str, *, classes: str | None = None) -> None:
+        super().__init__(text, classes=classes)
+        self.language = language
+        self.code = code
 
 
 class Entry(Vertical, can_focus=True):
@@ -270,7 +278,7 @@ class Entry(Vertical, can_focus=True):
             (marker, "dim"),
             (self.option.ljust(names), "bold"),
             ("  ", ""),
-            (type_name(self.entry).ljust(types), "magenta"),
+            (type_name(self.entry).ljust(types), "$text-secondary"),
             ("  ", ""),
         ]
         flag = _flag(self.entry, self.parent_name, returns=self.returns)
@@ -297,12 +305,12 @@ class Entry(Vertical, can_focus=True):
             if entry.get("sample") is not None:
                 sample = entry["sample"]
                 text = json.dumps(sample, indent=2) if isinstance(sample, (dict, list)) else yaml_value(sample)
-                blocks.append(Content.assemble(("Sample: ", "dim"), (text, "cyan")))
+                blocks.append(Content.assemble(("Sample: ", "dim"), (text, "$text-success")))
         else:
             # The line may be cut short, or cut its default, so it's here whole.
             default = entry.get("default")
             if "default" in entry and default is not None:
-                blocks.append(Content.assemble(("Default: ", "dim"), (yaml_value(default), "cyan")))
+                blocks.append(Content.assemble(("Default: ", "dim"), (yaml_value(default), "$text-success")))
             blocks.append(_choices(entry))
             extra: list[str] = []
             if aliases := as_list(entry.get("aliases")):
@@ -313,7 +321,7 @@ class Entry(Vertical, can_focus=True):
             if extra:
                 blocks.append(Content.styled(" · ".join(extra), "dim"))
             if deprecated := deprecation_text(entry.get("deprecated")):
-                blocks.append(_content(rich_text(deprecated)).stylize_before("yellow"))
+                blocks.append(_content(rich_text(deprecated)).stylize_before("$text-warning"))
             blocks.append(_sources(entry))
         return _join(*blocks, gap="\n\n")
 
@@ -427,8 +435,10 @@ class Section(Vertical, can_focus=True):
         Binding("left,h", "close", "Close", show=False),
     ]
 
-    def __init__(self, title: str, *body: Widget, entry_point: str | None = None, closed: bool = False) -> None:
-        super().__init__(classes="-closed" if closed else None)
+    def __init__(
+        self, title: str, *body: Widget, entry_point: str | None = None, closed: bool = False, classes: str = ""
+    ) -> None:
+        super().__init__(classes=f"{classes} -closed" if closed else classes)
         self.title = title
         self.body = body
         self.entry_point = entry_point
@@ -548,13 +558,13 @@ def _flag(entry: dict[str, object], parent: str | None, *, returns: bool) -> lis
     if returns:
         return []
     if entry.get("required") is True:
-        return [(f"required in {parent}" if parent else "required", "red")]
+        return [(f"required in {parent}" if parent else "required", "$text-error")]
     default = entry.get("default")
     if "default" in entry and default is not None:
         shown = yaml_value(default)
         if len(shown) > _MAX_FLAG - 2:
             shown = shown[: _MAX_FLAG - 3] + "…"
-        return [("= ", "dim"), (shown, "cyan")]
+        return [("= ", "dim"), (shown, "$text-success")]
     return []
 
 
@@ -632,6 +642,7 @@ class DocViewer(App[None]):
     .caption { height: auto; max-width: 104; margin: 1 0 0 1; }
     .under-caption { height: auto; max-width: 104; margin: 0 0 0 3; }
     .entries { height: auto; }
+    #tabs { height: 2; max-width: 108; margin-top: 1; }
     #status { height: 1; padding: 0 1; }
     #find { height: 1; display: none; }
     #find.-on { display: block; }
@@ -645,6 +656,9 @@ class DocViewer(App[None]):
         Binding("n", "next_hit(1)", "Match", key_display="n/N"),
         Binding("N", "next_hit(-1)", "Previous match", show=False),
         Binding("question_mark", "keys", "Keys", key_display="?"),
+        # Over the screen's own Tab, which moves the focus.
+        Binding("tab", "cycle_tab(1)", "Tab", priority=True, key_display="⇥"),
+        Binding("shift+tab", "cycle_tab(-1)", "Previous tab", priority=True, show=False),
         # [ and ] as well as Alt+arrows, which macOS terminals often send as something else.
         Binding("left_square_bracket,alt+left,backspace", "history_back", "Back/forward", key_display="[]"),
         Binding("right_square_bracket,alt+right", "history_forward", "Forward", show=False),
@@ -676,6 +690,8 @@ class DocViewer(App[None]):
         self.hit = -1
         """Which of what's found the cursor was last taken to."""
         self.before: Widget | None = None
+        self.tab = "docs"
+        """The tab the page shows."""
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll(id="page")
@@ -687,6 +703,7 @@ class DocViewer(App[None]):
 
     async def on_mount(self) -> None:
         self.screen.set_class(self.ansi, "-ansi")
+        self.theme_changed_signal.subscribe(self, self._theme_changed)
         await self._show(self.loaded, self.latest, self.history[self.at])
 
     # Building a page.
@@ -700,24 +717,22 @@ class DocViewer(App[None]):
         )
         page = self.query_one("#page", VerticalScroll)
         await page.remove_children()
-        await page.mount_all(self._widgets(loaded, plugin, docs, latest, readme_page=place.readme))
+        widgets = self._widgets(loaded, plugin, docs, latest)
+        present = [t for t in _TABS if any(w.has_class(f"-tab-{t}") for w in widgets)]
+        # Under the header, a lone tab hidden as it has nothing to switch to.
+        tabs = Tabs(*(Tab(_TABS[t], id=f"tab-{t}") for t in present), id="tabs")
+        tabs.display = len(present) > 1
+        # Tab and Shift+Tab switch tabs, so the bar never takes the focus from the page.
+        tabs.can_focus = False
+        await page.mount_all([widgets[0], tabs, *widgets[1:]])
+        self._switch(present[0])
         self.sub_title = f"{loaded.collection}.{plugin.name}"
-        page.scroll_home(animate=False)
         if place.path:
             await self._jump(place.path, returns=place.returns, entry_point=place.entry_point, remember=False)
         elif place.entry_point:
             self.action_show_entry_point(place.entry_point, remember=False)
-        # A role's list of entry points, else the first option, else the first heading.
-        elif first := (
-            next(iter(self.query("#entry-points")), None)
-            or next(iter(self.query(Entry)), None)
-            or next(iter(self.query(Section)), None)
-        ):
-            first.focus(scroll_visible=False)
         else:
-            # A README, which the page's own keys scroll, and the status line says it's what's shown.
-            page.focus(scroll_visible=False)
-            self.query_one("#status", Static).update(Content.styled("README" if self.query(Markdown) else "", "dim"))
+            self.call_after_refresh(self._open_if_it_fits)
         if self.found is not None:
             await self._mount_all()
         self.hit = -1
@@ -725,14 +740,91 @@ class DocViewer(App[None]):
         # Shown, what's in closed sections is mounted after, a section at a time, so finding has it ready.
         self.run_worker(self._mount_sections(), group="sections", exclusive=True)
 
+    def _switch(self, tab: str) -> None:
+        """Show ``tab``'s part of the page, with the header, and focus its first heading or option."""
+        self.tab = tab
+        page = self.query_one("#page", VerticalScroll)
+        for widget in page.children:
+            if widget.id != "tabs":
+                widget.display = widget.id == "head" or widget.has_class(f"-tab-{tab}")
+        tabs = self.query_one("#tabs", Tabs)
+        # Setting it posts TabActivated, which then finds this tab already shown.
+        tabs.active = f"tab-{tab}"
+        page.scroll_home(animate=False)
+        chain = self._chain()
+        # A role's list of entry points, else the first option, else the first heading.
+        if first := (
+            next((w for w in chain if w.id == "entry-points"), None)
+            or next((w for w in chain if isinstance(w, Entry)), None)
+            or next(iter(chain), None)
+        ):
+            first.focus(scroll_visible=False)
+        else:
+            # A README, which the page's own keys scroll, and the status line says it's what's shown.
+            page.focus(scroll_visible=False)
+            self.query_one("#status", Static).update(Content.styled("README" if tab == "readme" else "", "dim"))
+
+    async def _open_if_it_fits(self, tries: int = 3) -> None:
+        """Open the first level of options when all of it fits on the screen, as there's then no list to scan."""
+        page = self.query_one("#page", VerticalScroll)
+        entries = [w for w in self._chain() if isinstance(w, Entry) and isinstance(w.parent, _Entries)]
+        if not entries:
+            return
+        # A refresh doesn't promise the page is laid out yet.
+        if not entries[0].size.width:
+            if tries:
+                self.call_after_refresh(self._open_if_it_fits, tries - 1)
+            return
+        # As the detail's CSS lays it out, its max-width less its indent, and a blank line under it.
+        width = min(entries[0].size.width, 104) - 4
+        # The page's virtual size is never less than the screen, so what's on it is measured instead.
+        room = page.size.height - max(w.virtual_region_with_margin.bottom for w in page.children if w.display)
+        for entry in entries:
+            # Measured only until it's too much, so a long page stops after a screen's worth.
+            room -= (len(entry._detail().wrap(width)) + 1 if entry._detail().plain else 0) + len(entry.kids)
+            if room < 0:
+                return
+        await asyncio.gather(*(e.open() for e in entries))
+
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        tab = (event.tab.id or "").removeprefix("tab-")
+        if tab and tab != self.tab:
+            self._switch(tab)
+
+    def action_cycle_tab(self, step: int) -> None:
+        tabs = self.query_one("#tabs", Tabs)
+        if step > 0:
+            tabs.action_next_tab()
+        else:
+            tabs.action_previous_tab()
+
+    def _reveal(self, widget: Widget) -> None:
+        """Switch to the tab ``widget`` is in, if it isn't shown."""
+        at = self._tab_index(widget)
+        tab = list(_TABS)[at] if at >= 0 else self.tab
+        if tab != self.tab:
+            self._switch(tab)
+
     def _widgets(
         self,
         loaded: Loaded,
         plugin: ape.Plugin,
         docs: ape.PluginDocs | None,
         latest: str | None,
-        *,
-        readme_page: bool = False,
+    ) -> list[Widget]:
+        """The page's header, and what's under it, each with the class of the tab it's in."""
+        widgets = self._parts(loaded, plugin, docs, latest)
+        for widget in widgets[1:]:
+            if not any(widget.has_class(f"-tab-{t}") for t in _TABS):
+                widget.add_class("-tab-docs")
+        return widgets
+
+    def _parts(
+        self,
+        loaded: Loaded,
+        plugin: ape.Plugin,
+        docs: ape.PluginDocs | None,
+        latest: str | None,
     ) -> list[Widget]:
         fqcn = f"{loaded.collection}.{plugin.name}"
         parts = entry_points(plugin, docs, loaded.located) if docs is not None else []
@@ -740,15 +832,13 @@ class DocViewer(App[None]):
         documentation = as_map(parts[0][1].documentation) if parts and parts[0][0] in (None, "main") else {}
         short = as_text(documentation.get("short_description")) or plugin.short_description
         found = readme(loaded)
-        # The README and the docs are pages of their own, each linking to the other, when a role has both.
-        other = None if found is None or docs is None else "docs" if readme_page else "readme"
-        widgets: list[Widget] = [self._head(loaded, plugin, docs, documentation, short, latest, other)]
-        if found is not None and (readme_page or docs is None):
+        widgets: list[Widget] = [self._head(loaded, plugin, docs, documentation, short, latest)]
+        if found is not None:
             # Links are followed here, as only some can be.
-            widgets.append(Markdown(found[1], open_links=False, classes="readme"))
-            return widgets
+            widgets.append(Markdown(found[1], open_links=False, classes="readme -tab-readme"))
         if docs is None:
-            widgets.append(_Text(Content("No documentation."), classes="prose"))
+            if found is None:
+                widgets.append(_Text(Content("No documentation."), classes="prose"))
             return widgets
         # Any other entry point is under its name, as include_role needs it.
         if len(parts) == 1 and parts[0][0] in (None, "main"):
@@ -809,7 +899,7 @@ class DocViewer(App[None]):
             for caption, language, code in snippets:
                 caption_line = _Text(Content.styled(f"{caption}:", "dim"), classes="caption")
                 parts += [caption_line, self._code(language, code, classes="under-caption")]
-            widgets.append(Section("Usage", *parts))
+            widgets.append(Section("Usage", *parts, classes="-tab-usage"))
         inputs, positional, options = split_arguments(plugin_type, documentation)
         for title, entries in (("Input", inputs), ("Positional", positional), ("Options", options)):
             if entries:
@@ -821,30 +911,47 @@ class DocViewer(App[None]):
         if seealso := self._seealso(documentation.get("seealso")):
             widgets.append(Section("See also", *[_Bullet(line) for line in seealso]))
         if docs.examples and docs.examples.strip():
-            widgets.append(Section("Examples", self._code("yaml", docs.examples)))
+            widgets.append(Section("Examples", self._code("yaml", docs.examples), classes="-tab-examples"))
         returns = entries_under({"returns": docs.returns}, "returns")
         if (value := unnamed_return(plugin_type, returns)) is not None:
             described = [_content(rich_text(p)) for p in paragraphs_of(value.get("description"))]
-            text = _join(Content.styled(type_name(value), "magenta"), *described, gap="\n\n")
+            text = _join(Content.styled(type_name(value), "$text-secondary"), *described, gap="\n\n")
             if value.get("sample") is not None:
                 text = _join(
-                    text, Content.assemble(("Sample: ", "dim"), (yaml_value(value["sample"]), "cyan")), gap="\n\n"
+                    text,
+                    Content.assemble(("Sample: ", "dim"), (yaml_value(value["sample"]), "$text-success")),
+                    gap="\n\n",
                 )
-            widgets.append(Section("Returns", _Text(text, classes="prose")))
+            widgets.append(Section("Returns", _Text(text, classes="prose"), classes="-tab-returns"))
         elif returns:
             box = self._entries(returns, returns=True, section="returns", entry_point=entry)
-            widgets.append(Section("Return values", box))
+            widgets.append(Section("Return values", box, classes="-tab-returns"))
         return widgets
 
-    def _code(self, language: str, code: str, *, classes: str = "prose") -> _Text:
+    def _code(self, language: str, code: str, *, classes: str = "prose") -> _Code:
+        text = "\n".join(line.rstrip() for line in code.strip("\n").splitlines())
+        return _Code(self._highlight(language, text), language, text, classes=classes)
+
+    def _highlight(self, language: str, code: str) -> Content:
         """Code highlighted with Textual's own highlighting, in the theme's colours and on its background, which
-        Rich's Syntax isn't: ``yaml`` examples, ``jinja`` expressions or ``ini`` settings."""
+        Rich's Syntax isn't: ``yaml`` examples, ``jinja`` expressions or ``ini`` settings. An ANSI theme has its own
+        highlighting, in the terminal's colours, and the others take theirs from the theme's variables."""
         from textual.highlight import ANSIDarkHighlightTheme, ANSILightHighlightTheme, HighlightTheme, highlight
 
-        text = "\n".join(line.rstrip() for line in code.strip("\n").splitlines())
-        ansi = ANSILightHighlightTheme if self.light else ANSIDarkHighlightTheme
+        theme = self.current_theme
+        if theme.name.startswith("ansi-"):
+            styles = ANSIDarkHighlightTheme if theme.dark else ANSILightHighlightTheme
+        else:
+            styles = HighlightTheme
         lexer = {"yaml": "yaml+jinja", "jinja": "jinja", "shell": "bash"}.get(language, language)
-        return _Text(highlight(text, language=lexer, theme=ansi if self.ansi else HighlightTheme), classes=classes)
+        return highlight(code, language=lexer, theme=styles)
+
+    def _theme_changed(self, theme: Theme) -> None:
+        """Follow a theme picked from the command palette: the ANSI look where it's an ANSI theme, and code
+        highlighted again, as only an ANSI theme's highlighting differs."""
+        self.screen.set_class(theme.name.startswith("ansi-"), "-ansi")
+        for code in self.query(_Code):
+            code.show(self._highlight(code.language, code.code))
 
     def _head(
         self,
@@ -854,7 +961,6 @@ class DocViewer(App[None]):
         documentation: dict[str, object],
         short: str | None,
         latest: str | None,
-        other: str | None = None,
     ) -> _Text:
         collection = loaded.collection
         lines: list[Content | None] = []
@@ -873,7 +979,7 @@ class DocViewer(App[None]):
             where = "version" if collection == BUILTIN else collection
             lines.append(Content.styled(f"Added in {where} {as_text(added)}.", "dim"))
         if deprecated := deprecation_text(documentation.get("deprecated")):
-            lines.append(_content(rich_text(deprecated)).stylize_before("yellow"))
+            lines.append(_content(rich_text(deprecated)).stylize_before("$text-warning"))
         if docs is not None and (missing := sorted({*docs.fragments, *docs.return_fragments})):
             what = "fragment" if len(missing) == 1 else "fragments"
             verb = "adds" if len(missing) == 1 else "add"
@@ -881,13 +987,9 @@ class DocViewer(App[None]):
                 Content.styled(
                     f"Not shown: what the doc {what} {and_list(missing)} {verb}, which couldn't be found or read without "
                     + "running code.",
-                    "yellow",
+                    "$text-warning",
                 )
             )
-        # The README, or back from it to the docs.
-        if other is not None:
-            shown = "README" if other == "readme" else "documentation"
-            lines.append(_content([("See the ", "dim", None), (shown, "page", other)]))
         # The other types of plugin the name asked for is: a lookup as well as a module, say.
         if loaded.others:
             links: list[Segment] = [("Also a ", "dim", None)]
@@ -897,11 +999,11 @@ class DocViewer(App[None]):
                 links.append((other, "plugin", f"{name}#{other}"))
             lines.append(_content(links))
         head = _Text(_join(*lines), id="head")
-        head.border_title = Content.styled(f"{collection}.{plugin.name}", "bold blue")
+        head.border_title = Content.styled(f"{collection}.{plugin.name}", "bold $text-primary")
         kind = plugin.type
         if plugin.type == "callback" and (callback := as_text(documentation.get("type"))):
             kind = f"{callback} callback"
-        head.border_subtitle = Content.styled(kind, "magenta")
+        head.border_subtitle = Content.styled(kind, "$text-secondary")
         return head
 
     def _badges(self, value: object) -> Content | None:
@@ -997,11 +1099,6 @@ class DocViewer(App[None]):
     def action_open_link(self, url: str) -> None:
         self.open_url(url)
 
-    def action_show_readme(self, readme: bool) -> None:
-        """Go to the role's README, or back from it to its docs, as a page of its own in history."""
-        current = self.history[self.at]
-        self._visit(_Place(current.fqcn, current.types, readme=readme))
-
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
         """A README's link: a URL opens in the browser, and a heading is gone to. A file in the collection isn't
         shown, so says so."""
@@ -1020,6 +1117,7 @@ class DocViewer(App[None]):
             current = self.history[self.at]
             self.history[self.at + 1 :] = [_Place(current.fqcn, current.types, entry_point=entry_point)]
             self.at += 1
+        self._reveal(section)
         section.action_open()
         section.focus(scroll_visible=False)
         # Once laid out, which a page just shown from history isn't yet.
@@ -1061,6 +1159,7 @@ class DocViewer(App[None]):
                 _Place(current.fqcn, current.types, path, returns=returns, entry_point=entry_point)
             ]
             self.at += 1
+        self._reveal(found)
         found.focus()
         found.add_class("-flash")
         self.set_timer(1.0, lambda: found.remove_class("-flash"))
@@ -1140,6 +1239,12 @@ class DocViewer(App[None]):
         headings = [i for i, w in enumerate(chain) if isinstance(w, Section)]
         found = [i for i in headings if i > at] if step > 0 else [i for i in headings if i < at][::-1]
         if not found:
+            # Past the last heading, or before the first, the page scrolls a screen instead.
+            page = self.query_one("#page", VerticalScroll)
+            if step > 0:
+                page.scroll_page_down(animate=False)
+            else:
+                page.scroll_page_up(animate=False)
             return
         chain[found[0]].focus()
         if found[0] == 0:
@@ -1147,20 +1252,26 @@ class DocViewer(App[None]):
 
     def move(self, step: int) -> None:
         """Move to the next or previous heading or option, stopping at the ends rather than going round; at the
-        first, the page goes to its top, so the header shows."""
+        first, the page goes to its top, so the header shows. At either end, the page scrolls a line instead, as on
+        a tab with only one section, such as the examples."""
         chain = self._chain()
         focused = self.focused
         at = chain.index(focused) if focused in chain else -1
         target = max(0, min(len(chain) - 1, at + step))
+        page = self.query_one("#page", VerticalScroll)
         if chain and target != at:
             chain[target].focus()
-        if chain and target == 0:
-            self.query_one("#page", VerticalScroll).scroll_home()
+            if target == 0:
+                page.scroll_home()
+        else:
+            page.scroll_relative(y=step, animate=False)
 
     # Finding on the page, and closing what's open.
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        # n and N are only in the footer while something's being found.
+        # n and N are only in the footer while something's being found, and Tab while there's more than one.
+        if action == "cycle_tab":
+            return len(self.query(Tab)) > 1
         return self.found is not None if action == "next_hit" else True
 
     def action_find(self) -> None:
@@ -1242,7 +1353,14 @@ class DocViewer(App[None]):
             plain = widget.text.plain
             lines = sorted({plain.count("\n", 0, m.start()) for m in self.found.finditer(plain)})
             hits += [(widget, line) for line in lines]
-        return hits
+        # In the order of the tabs, not of the page, which has them mixed.
+        return sorted(hits, key=lambda hit: self._tab_index(hit[0]))
+
+    def _tab_index(self, widget: Widget) -> int:
+        """Where the tab ``widget`` is in comes in the order of the tabs, with the header first."""
+        page = self.query_one("#page", VerticalScroll)
+        top = next((a for a in widget.ancestors_with_self if a.parent is page), None)
+        return next((i for i, t in enumerate(_TABS) if top is not None and top.has_class(f"-tab-{t}")), -1)
 
     def _count(self) -> None:
         count = len(self._hits())
@@ -1267,6 +1385,7 @@ class DocViewer(App[None]):
             return
         self.hit = (self.hit + step) % len(hits) if self.hit >= 0 else (0 if step > 0 else len(hits) - 1)
         hit, line = hits[self.hit]
+        self._reveal(hit)
         for entry in reversed([a for a in hit.ancestors if isinstance(a, Entry)]):
             await entry.open()
         for section in (a for a in hit.ancestors if isinstance(a, Section)):

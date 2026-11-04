@@ -12,21 +12,24 @@
 
 [[recording]]
 name = "overview"
-title = "Opening an option, then the examples and return values"
+schemes = true
+title = "Opening an option, then the other tabs"
 rows = 30
 commands = ["alai-doc ns.coll.thing -t module"]
 keys = [
     2,
     "down", "down",
     "enter", 2.5,
-    "}", "}", "}", 2.5,
-    "}", 1,
+    "tab", 2,
+    "tab", 2,
+    "tab", 1,
     "down", "enter", 2.5,
     "q",
 ]
 
 [[recording]]
 name = "role-readme"
+schemes = true
 title = "A role's entry points, then its README"
 rows = 30
 commands = ["alai-doc ns.coll.webserver"]
@@ -34,14 +37,14 @@ keys = [
     2,
     "down", "down", 1,
     "enter", 3,
-    "home", 1.5,
-    { click = [14, 4] }, 3.5,
-    "[", 2,
+    "tab", 3.5,
+    "tab", 2,
     "q",
 ]
 
 [[recording]]
 name = "viewer"
+schemes = true
 title = "Reading a module's docs in the viewer"
 rows = 30
 commands = ["alai-doc ns.coll.thing -t module"]
@@ -54,6 +57,24 @@ keys = [
     "}", 1,
     "/", "token", "enter", 2,
     "escape", 1,
+    "q",
+]
+
+[[recording]]
+name = "themes"
+schemes = true
+title = "Picking another theme"
+rows = 30
+commands = ["alai-doc ns.coll.thing -t module"]
+# cli-recorder has no name for Ctrl+P, so it's sent as the control character itself.
+keys = [
+    2,
+    "\u0010", 1.5,
+    "theme", 1,
+    "enter", 1.5,
+    "nord", 1.5,
+    "enter", 2.5,
+    "tab", "tab", 2.5,
     "q",
 ]
 

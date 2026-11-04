@@ -92,4 +92,6 @@ def environment(root: pathlib.Path, _scenarios: dict[str, object]) -> _c.Generat
     world.add("other.coll", other_collection(root / "other.coll"), "1.0.0")
     world.add("ansible.builtin", ansible_core(root / "core"), "2.99.0")
     world.save()
-    yield {"ALAI_DOC_ALAI": str(world.executable())}
+    # cli-recorder sets only TERM=xterm-256color, which squeezes the viewer's theme into 256 colors. The player shows
+    # 24-bit color, as most terminals do.
+    yield {"ALAI_DOC_ALAI": str(world.executable()), "COLORTERM": "truecolor"}
