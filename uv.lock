@@ -122,7 +122,7 @@ wheels = [
 [[package]]
 name = "cli-recorder"
 version = "0.1.0"
-source = { git = "https://github.com/alai-sh/cli-recorder#03a613ab0aabf4d2378714985ac9f76384283e44" }
+source = { git = "https://github.com/alai-sh/cli-recorder#ab75da4d0f2edb0ffc6a6556845e2fa8c15dd2a7" }
 
 [[package]]
 name = "click"

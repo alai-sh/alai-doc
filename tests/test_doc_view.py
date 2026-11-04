@@ -35,9 +35,13 @@ def project(world: World, monkeypatch: pytest.MonkeyPatch) -> World:
 
 
 def run(
-    name: str, steps: _c.Callable[[DocViewer, Pilot[None]], _c.Awaitable[None]], *, types: tuple[str, ...] = ()
+    name: str,
+    steps: _c.Callable[[DocViewer, Pilot[None]], _c.Awaitable[None]],
+    *,
+    types: tuple[str, ...] = (),
+    size: tuple[int, int] = (100, 45),
 ) -> None:
-    """Open ``name`` in the viewer, 100 by 45, and run ``steps`` on it."""
+    """Open ``name`` in the viewer, 100 by 45 unless ``size`` says otherwise, and run ``steps`` on it."""
     from alai_doc._alai import Alai
     from alai_doc._doc_model import load
     from alai_doc._doc_view import DocViewer, _Place
@@ -49,7 +53,7 @@ def run(
         plugin = loaded.plugins[0][0]
         place = _Place(f"{loaded.collection}.{plugin.name}", (plugin.type,))
         app = DocViewer(alai, loaded, None, place)
-        async with app.run_test(size=(100, 45)) as pilot:
+        async with app.run_test(size=size) as pilot:
             await pilot.pause()
             await steps(app, pilot)
 
@@ -92,16 +96,33 @@ def test_page(project: World) -> None:
         # The other type of plugin with this name, to follow.
         assert "│ Also a lookup" in text
         assert "check_mode ✓   diff_mode ◐   platform posix" in text
-        assert "▾ Usage" in text
-        assert "In a task:" in text
-        assert "- ns.coll.thing:" in text
         # The first option has the cursor; each is a line, with required and the default in words.
         assert focused(app) == "mode"
         assert "▸ name       str         required" in text
         assert "▸ state      str         = present" in text
         assert app.theme == "textual-dark"
         assert app.sub_title == "ns.coll.thing"
-        assert "⏎ Open/close q Quit / Find ? Keys [] Back/forward" in text
+        assert "⏎ Open/close ⇥ Tab q Quit / Find ? Keys [] Back/forward" in text
+        # Usage, examples and return values are each a tab, which Tab and Shift+Tab go round.
+        assert " Docs  Usage  Examples  Returns" in text
+        assert "▾ Usage" not in text
+        await settle(pilot, "tab")
+        text = screen(app)
+        assert focused(app) == "[Usage]"
+        assert "In a task:" in text
+        assert "- ns.coll.thing:" in text
+        assert "▾ Options" not in text
+        # The header is on every tab.
+        assert "╭─ ns.coll.thing ─" in text
+        # Round from the first to the last, which starts at its first return value.
+        await settle(pilot, "shift+tab", "shift+tab")
+        assert focused(app) == "changed_things"
+        await settle(pilot, "tab")
+        assert focused(app) == "mode"
+        # A click on a tab shows it.
+        await pilot.click("#tab-examples")
+        await pilot.pause()
+        assert focused(app) == "[Examples]"
 
     run("ns.coll.thing", steps, types=("module",))
 
@@ -136,6 +157,22 @@ def test_find(project: World) -> None:
         assert "10/10" in screen(app)
         await settle(pilot, "n")
         assert "1/10" in screen(app)
+
+    run("ns.coll.thing", steps, types=("module",))
+
+
+def test_find_on_another_tab(project: World) -> None:
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        # Only the examples have this, so the first match switches to their tab.
+        await settle(pilot, "slash", *"Make a thing", "enter")
+        assert app.tab == "examples"
+        assert focused(app) == "[Examples]"
+        assert "1/1" in screen(app)
+        # A link to a return value switches to the return values' tab.
+        await app.run_action("goto('changed_things', True)")
+        await pilot.pause()
+        assert app.tab == "returns"
+        assert focused(app) == "changed_things"
 
     run("ns.coll.thing", steps, types=("module",))
 
@@ -228,6 +265,23 @@ def test_moving_stops_at_the_ends(project: World) -> None:
     run("ns.coll.thing", steps, types=("module",))
 
 
+def test_keys_scroll_a_tab_with_one_section(project: World) -> None:
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        await settle(pilot, "tab", "tab")
+        assert focused(app) == "[Examples]"
+        page = app.query_one("#page")
+        # Only one heading to move to, so the keys scroll the page.
+        await settle(pilot, "down", "down")
+        assert page.scroll_y == 2
+        await settle(pilot, "up")
+        assert page.scroll_y == 1
+        await settle(pilot, "pagedown")
+        assert page.scroll_y > 1
+        assert focused(app) == "[Examples]"
+
+    run("ns.coll.thing", steps, types=("module",), size=(100, 12))
+
+
 def test_sections_close(project: World) -> None:
     async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
         await settle(pilot, "home", "enter")
@@ -274,9 +328,10 @@ def test_links_and_history(project: World) -> None:
         await pilot.pause()
         text = screen(app)
         assert "lookup ─╯" in text
-        assert "{{ lookup('ns.coll.thing', <terms>, endpoint=<str>) }}" in text
         assert "▾ Positional" in text
-        assert "▾ Returns" in text
+        assert " Docs  Usage  Returns" in text
+        await settle(pilot, "tab")
+        assert "{{ lookup('ns.coll.thing', <terms>, endpoint=<str>) }}" in screen(app)
         await settle(pilot, "left_square_bracket")
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -353,7 +408,9 @@ def test_readme(project: World, monkeypatch: pytest.MonkeyPatch) -> None:
         # Its only docs, with nothing to link to.
         assert "Plain role" in text
         assert "plain_name" in text
-        assert "See the" not in text
+        # Its only tab, so there's no bar of them, and Tab isn't a key.
+        assert not app.query_one("#tabs").display
+        assert "⇥ Tab" not in text
         # A file in the collection isn't shown.
         from textual.widgets import Markdown
 
@@ -368,20 +425,19 @@ def test_readme(project: World, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_readme_and_docs(project: World) -> None:
     async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
-        assert "See the README" in screen(app)
+        # The README is a tab after the docs.
+        assert " Docs  Usage  README" in screen(app)
         assert "More about solo" not in screen(app)
-        await app.run_action("show_readme(True)")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
+        await settle(pilot, "shift+tab")
         text = screen(app)
         assert "More about solo" in text
-        assert "See the documentation" in text
         assert "count" not in text
         assert app.query_one("#status").render().plain == "README"  # pyright: ignore[reportAttributeAccessIssue]
-        await settle(pilot, "left_square_bracket")
-        await app.workers.wait_for_complete()
+        # Going to an option goes back to the tab it's in.
+        await app.run_action("goto('count')")
         await pilot.pause()
         assert focused(app) == "count"
+        assert "More about solo" not in screen(app)
 
     run("ns.coll.solo", steps)
 
@@ -416,12 +472,23 @@ def test_link_that_fails(project: World, monkeypatch: pytest.MonkeyPatch) -> Non
     run("ns.coll.thing", steps, types=("module",))
 
 
+@pytest.mark.parametrize(("rows", "expected"), [(45, {"input", "times", "sep"}), (20, set())])
+def test_opened_when_it_fits(project: World, rows: int, expected: set[str]) -> None:
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        await pilot.pause()
+        # The first level is opened when all of it fits, and left as a line each when it doesn't.
+        assert opened(app) == expected
+
+    run("ns.coll.double", steps, size=(100, rows))
+
+
 def test_filter(project: World) -> None:
     async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
         text = screen(app)
-        assert "{{ <input> | ns.coll.double(<times>, sep=<str>) }}" in text
         assert "▾ Input" in text
-        assert "▸ input  raw  required" in text
+        assert "▾ input  raw  required" in text
+        await settle(pilot, "tab")
+        assert "{{ <input> | ns.coll.double(<times>, sep=<str>) }}" in screen(app)
 
     run("ns.coll.double", steps)
 
@@ -444,6 +511,42 @@ def test_themes(project: World, monkeypatch: pytest.MonkeyPatch, environ: dict[s
     async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
         assert app.theme == theme
         assert app.screen.has_class("-ansi") == theme.startswith("ansi")
+
+    run("ns.coll.thing", steps, types=("module",))
+
+
+def colour_of(app: DocViewer, text: str) -> str:
+    """The colour the first piece of the screen that's ``text`` is drawn in."""
+    for strip in app.screen._compositor.render_strips():
+        for segment in strip:
+            if segment.text.strip() == text and segment.style is not None:
+                return str(segment.style.color)
+    raise AssertionError(text)
+
+
+def test_follows_the_theme(project: World) -> None:
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        # The types, links and defaults are in the theme's colours, which picking another changes.
+        before = colour_of(app, "raw"), colour_of(app, "slow")
+        app.theme = "nord"
+        await pilot.pause()
+        assert (colour_of(app, "raw"), colour_of(app, "slow")) != before
+        await settle(pilot, "tab", "tab")
+        from alai_doc._doc_view import _Code
+
+        def styles() -> set[str]:
+            return {str(span.style) for span in app.query_one(_Code).text.spans}
+
+        # Other themes highlight code from their variables, and an ANSI theme in the terminal's own colours.
+        assert "ansi_blue bold" not in styles()
+        app.theme = "ansi-dark"
+        await pilot.pause()
+        assert app.screen.has_class("-ansi")
+        assert "ansi_blue bold" in styles()
+        app.theme = "textual-dark"
+        await pilot.pause()
+        assert not app.screen.has_class("-ansi")
+        assert "ansi_blue bold" not in styles()
 
     run("ns.coll.thing", steps, types=("module",))
 
@@ -538,20 +641,19 @@ def test_page_keys_move_by_section(project: World) -> None:
         await settle(pilot, "pagedown")
         assert focused(app) == "[Notes]"
         assert "╭─ ns.coll.thing ─" in screen(app)
-        # The braces do the same.
-        await settle(pilot, "right_curly_bracket", "pagedown", "pagedown", "pagedown")
-        # It stops at the last.
-        assert focused(app) == "[Return values]"
-        # Page Up from inside a section goes to its own heading first, then the one before.
-        await settle(pilot, "down", "down")
-        assert focused(app) == "details"
-        await settle(pilot, "pageup")
-        assert focused(app) == "[Return values]"
-        await settle(pilot, "left_curly_bracket")
-        assert focused(app) == "[Examples]"
-        await settle(pilot, "pageup")
+        # The braces do the same. It stops at the last in the tab.
+        await settle(pilot, "right_curly_bracket", "pagedown", "pagedown")
         assert focused(app) == "[See also]"
-        await settle(pilot, "pageup", "pageup", "pageup", "pageup", "pageup", "pageup")
+        # Page Up from inside a section goes to its own heading first, then the one before.
+        await settle(pilot, "up")
+        assert focused(app) == "[Notes]"
+        await settle(pilot, "up")
+        assert focused(app) == "token"
+        await settle(pilot, "pageup")
+        assert focused(app) == "[Options]"
+        await settle(pilot, "left_curly_bracket")
+        assert focused(app) == "[Description]"
+        await settle(pilot, "pageup", "pageup")
         assert focused(app) == "[Description]"
         # At the first, the page is at its top, so the header shows.
         assert "╭─ ns.coll.thing ─" in screen(app)

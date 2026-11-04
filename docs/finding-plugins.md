@@ -42,7 +42,8 @@ Use `-t` to specify the plugin type in the case of multiple matches by name.
 ## Roles
 
 A role is shown from its argument spec when it has one, with a section for
-each entry point and the options it takes. A role with no argument spec is
+each entry point and the options it takes. A role that also has a
+`README.md` has it in a tab after the docs. A role with no argument spec is
 shown from its `README.md`, which is rendered as Markdown.
 
 [A role with only a README](casts/role.cast){ .cli-cast }
