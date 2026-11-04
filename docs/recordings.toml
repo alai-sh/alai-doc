@@ -1,0 +1,85 @@
+# The terminal recordings in the docs, made by python -m cli_recorder record on
+# every docs build. The keys of a [[recording]] are in cli-recorder's
+# README.
+#
+# Every recording runs against the tests' stand-in for alai, set up by
+# docs/recordings.py. It has ns.coll 2.0.0 in its cache, with 3.0.0 the
+# latest, and ansible-core 2.99.0 as ansible.builtin, which routes the
+# short name thing to ns.coll.thing.
+#
+# The viewer recording presses keys as cli-recorder's keys say, and has to
+# end by quitting. The other recordings use --output-format markdown.
+
+[[recording]]
+name = "overview"
+title = "Opening an option, then the examples and return values"
+rows = 30
+commands = ["alai-doc ns.coll.thing -t module"]
+keys = [
+    2,
+    "down", "down",
+    "enter", 2.5,
+    "}", "}", "}", 2.5,
+    "}", 1,
+    "down", "enter", 2.5,
+    "q",
+]
+
+[[recording]]
+name = "role-readme"
+title = "A role's entry points, then its README"
+rows = 30
+commands = ["alai-doc ns.coll.webserver"]
+keys = [
+    2,
+    "down", "down", 1,
+    "enter", 3,
+    "home", 1.5,
+    { click = [14, 4] }, 3.5,
+    "[", 2,
+    "q",
+]
+
+[[recording]]
+name = "viewer"
+title = "Reading a module's docs in the viewer"
+rows = 30
+commands = ["alai-doc ns.coll.thing -t module"]
+keys = [
+    2,
+    "down", "down", "down",
+    "enter", 2,
+    "enter", 0.5,
+    "}", 1,
+    "}", 1,
+    "/", "token", "enter", 2,
+    "escape", 1,
+    "q",
+]
+
+[[recording]]
+name = "markdown"
+title = "Printing a plugin's docs"
+commands = ["alai-doc ns.coll.double --output-format markdown"]
+
+[[recording]]
+name = "short-names"
+title = "Finding a plugin by its short name"
+commands = [
+    "alai-doc copy --output-format markdown | head -n 6",
+    "alai-doc thing --output-format markdown | head -n 7",
+    "alai-doc tunnel --output-format markdown",
+]
+
+[[recording]]
+name = "types"
+title = "Choosing a plugin's type"
+commands = [
+    "alai-doc ns.coll.thing --output-format markdown",
+    "alai-doc ns.coll.thing -t lookup --output-format markdown | head -n 16",
+]
+
+[[recording]]
+name = "role"
+title = "A role with only a README"
+commands = ["alai-doc ns.coll.plain --output-format markdown"]

@@ -42,7 +42,7 @@ from ._doc_model import (
     yaml_value,
 )
 from ._markup import Segment, and_list, as_sentence, markup
-from ._output import home_path, warn
+from ._output import error, home_path
 
 if _t.TYPE_CHECKING:
     from alai_core import extract as ape
@@ -54,14 +54,15 @@ def doc(alai: Alai, name: str, *, types: list[str], output_format: str | None = 
     parts = name.split(".")
     if not all(parts) or len(parts) == 2:
         raise Error(
-            f"'{name}' isn't a plugin's name, such as ansible.builtin.copy or copy; alai find searches by part of one"
+            f"'{name}' isn't a plugin's name, such as ansible.builtin.copy or copy, but alai find can search by part of one"
         )
     # A full-screen viewer needs a terminal that can draw one.
     viewer = output_format is None and sys.stdout.isatty() and sys.stdin.isatty() and os.environ.get("TERM") != "dumb"
     try:
         loaded = load(alai, name, types)
     except NotFound as e:
-        warn(str(e))
+        # An error, though with its own exit code, so a script can tell a missing plugin from a failure.
+        error(str(e))
         return EXIT_NOT_FOUND
     if viewer:
         from ._doc_view import view
@@ -94,7 +95,7 @@ def _plugin(loaded: Loaded, plugin: ape.Plugin, docs: ape.PluginDocs | None, lat
 
     origin = origin_text(loaded.located)
     if latest:
-        origin = f"{origin.rstrip('.')}; {latest} is the latest."
+        origin = f"{origin.rstrip('.')}, but {latest} is the latest."
     kind = plugin.type
     if plugin.type == "callback" and (callback := as_text(documentation.get("type"))):
         kind = f"{callback} callback"

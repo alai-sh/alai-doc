@@ -119,8 +119,10 @@ def load(alai: Alai, name: str, types: _c.Sequence[str] = ()) -> Loaded:
         kind = f" of type {', '.join(types)}" if types else ""
         searched = " or ".join(BUILTIN if c == LEGACY else c for c in search)
         if names := _suggestions(alai, asked, types):
-            raise NotFound(f"{searched} has no plugin {asked}{kind}; did you mean {or_list(names)}?")
-        raise NotFound(f"{searched} has no plugin {asked}{kind}; alai find {asked} searches every collection for one")
+            raise NotFound(f"{searched} has no plugin {asked}{kind}, did you mean {or_list(names)}")
+        raise NotFound(
+            f"{searched} has no plugin {asked}{kind}, but alai find {asked} searches every collection for one"
+        )
     if len(chosen) > 1:
         raise Error(_conflict(asked, {k: (h.name, d) for k, (h, d) in chosen.items()}))
     [(kind, (hop, _))] = chosen.items()
@@ -152,7 +154,7 @@ def _check_index(alai: Alai, name: str, types: _c.Sequence[str]) -> None:
             raise NotFound(f"no index has the collection {collection}")
         # Close names in the same collection, as a mistyped name usually is.
         close = [f"{collection}.{n}" for n in difflib.get_close_matches(short, sorted(names), n=3)]
-        also = f"; did you mean {or_list(close)}?" if close else ""
+        also = f", did you mean {or_list(close)}" if close else ""
         raise NotFound(f"no index has a plugin {name}{kind}{also}")
     if len(chosen) > 1:
         raise Error(_conflict(name, chosen))
@@ -269,7 +271,7 @@ def _not_found(asked: str, hop: _Hop, types: list[str]) -> str:
     names = sorted({p.name for p in hop.extracted.plugins if not types or p.type in types})
     close = difflib.get_close_matches(asked.rsplit(".", 1)[-1], names, n=3)
     prefix = f"{hop.name}." if "." in asked else ""
-    also = f"; did you mean {', '.join(repr(prefix + n) for n in close)}?" if close else ""
+    also = f", did you mean {or_list([prefix + n for n in close])}" if close else ""
     return f"{shown} has no plugin {asked}{kind}{also}"
 
 
