@@ -8,27 +8,41 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "alai"
-version = "0.0.1"
-source = { git = "https://github.com/alai-sh/alai-cli?rev=5a618e08518d911121143d82fd63bfd59da12216#5a618e08518d911121143d82fd63bfd59da12216" }
-dependencies = [
-    { name = "alai-core" },
-    { name = "argcomplete" },
-    { name = "distlib" },
-]
-
-[[package]]
 name = "alai-core"
-version = "0.0.1"
-source = { git = "https://github.com/alai-sh/alai-core?rev=eb18167e081db4f6a6bde297c28b1216896b42b6#eb18167e081db4f6a6bde297c28b1216896b42b6" }
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/78/462908330f3fec24e627c50ec421b60156f494ec9836c8e14b13bbd33431/alai_core-0.1.0.tar.gz", hash = "sha256:278063e9c58ec6e0787acd64ee4ef49e887b677dbd9142671cfe7ba22ecb4c45", size = 150115, upload-time = "2026-11-05T03:34:34.701Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e7/fa/bbdfd06c54431a825c1eb8062d49f8eda77c9f1c3baa7473a5d0812f73d2/alai_core-0.1.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:45b4ae464cf7f9dc8690de5303ac92f2a0dc28397b54670caf5579bd0442c4bd", size = 1816037, upload-time = "2026-11-05T03:33:56.303Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/90/66b3853eb1e007b5e18dc8fe86ae42d8c42d4c315a85abbb5b847171935c/alai_core-0.1.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:12dce2f823316cbaf1818c76110951d873b85cbe257bda291ec7536208b39fce", size = 1872858, upload-time = "2026-11-05T03:33:58.16Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/ce/36148bf65f6d6645f3c75ce593443aa5e2757c13db854f56f79b82cd8ace/alai_core-0.1.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6cface71483dbfddfdd333017b41c78586722ccb94ea649076b38c8d863549ff", size = 1945274, upload-time = "2026-11-05T03:34:00.032Z" },
+    { url = "https://files.pythonhosted.org/packages/26/12/84b908d9adefc8a1dea8c52d4e89f160c0ca11c4602d83e02cf81f38e9e5/alai_core-0.1.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:9e39736878c41363601d6c41ff1604e3b1d5cfaceac4ee8158fc306b14772a01", size = 1943167, upload-time = "2026-11-05T03:34:01.827Z" },
+    { url = "https://files.pythonhosted.org/packages/38/cd/cbb0c2650af46f3c8c890964bd4451cbe3ab25016ba18fc04d9fd1445108/alai_core-0.1.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:ff5067708475a1dec25e02667d7c0ae4ba62b76ad61e67b664776962de068802", size = 2033060, upload-time = "2026-11-05T03:34:03.978Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/1c/7f74e7715b3a8deceb6fe4c4ac5703c78d4bc2b32c817aef990e6bb7ec3e/alai_core-0.1.0-cp310-abi3-win_amd64.whl", hash = "sha256:a09e7067db88339d8831a6203b903ef42f85c326ba78fbce2194e797bc3e676f", size = 1826489, upload-time = "2026-11-05T03:34:05.684Z" },
+    { url = "https://files.pythonhosted.org/packages/04/1c/cf7617d5164b0d2d729d5e95731c3e4100d42a7ec66d3cd707f87e7e0175/alai_core-0.1.0-cp310-abi3-win_arm64.whl", hash = "sha256:c2dadfc56e5f774cc7e49bdb4a88965689d5da0d44faa0bdc6fa40e6ffb76432", size = 1741313, upload-time = "2026-11-05T03:34:07.383Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/f8/955db948f96b6f8901d7c19c69414f5c338f1d0f578385cef69737fce8eb/alai_core-0.1.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:a99a2da70c9915d8a3536d98a18619290f8fc1c79d336d1b8799c12ae2f96654", size = 1803246, upload-time = "2026-11-05T03:34:09.166Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/cc/ecacbc5a910bc261ea0665bc7c986e21976335b906cbb5ad12c1552c38b2/alai_core-0.1.0-cp314-cp314t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7b2c732094f2aa94128cecb4e20da7a364ac7c8b6cc2c39a3cc24a68b4589aab", size = 1862667, upload-time = "2026-11-05T03:34:10.982Z" },
+    { url = "https://files.pythonhosted.org/packages/51/b6/4af9138986c37bfbf0fca47fd63f0ab2c6a8a9a1d4156cfbe939f03d2d6b/alai_core-0.1.0-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0fa083d170c7f1d88a07d73f97b6996f2c3449aec971041e33a1a72ee94dbc39", size = 1935825, upload-time = "2026-11-05T03:34:12.678Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/a3/4947b3a34bf1c8d01544528351883fe5239214843be57033d5395f2fd805/alai_core-0.1.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:c4ffb8b60b137f3f86dc8f3f1a50e159564f9338318d0e69f5852a792acf72c0", size = 1932785, upload-time = "2026-11-05T03:34:14.37Z" },
+    { url = "https://files.pythonhosted.org/packages/83/3f/d39fd428771cae61abd1e4600eda67f2aa9f5c7b3453970667031cff3369/alai_core-0.1.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:e5fdde4d4bc83c982d46d17b24fabd16eff407f95b3b564c36130de33997d268", size = 2021558, upload-time = "2026-11-05T03:34:16.196Z" },
+    { url = "https://files.pythonhosted.org/packages/38/f6/a9071fa15ee7c190aa3271c47536d132a084a47f4a1c15dbd72ee82c7454/alai_core-0.1.0-cp314-cp314t-win_amd64.whl", hash = "sha256:47ceb65e4b5b7e418e4db8ee80f1bfbb0ca796473d8d16ce8076deae5e719679", size = 1818354, upload-time = "2026-11-05T03:34:18.184Z" },
+    { url = "https://files.pythonhosted.org/packages/48/7a/6179745dd0f54ccd9b01c4f2f405b75e64aab42a867edf98217132acde5a/alai_core-0.1.0-cp314-cp314t-win_arm64.whl", hash = "sha256:fb9e2837079e166a0ef2e55f5ba0ef50ec88d5eb88f30ac5bb4acf4bfb08227a", size = 1732423, upload-time = "2026-11-05T03:34:19.923Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/96/6e754b810f62e5dadbf873e9929db34a6205f83417b0826787ef6477d08f/alai_core-0.1.0-cp315-abi3.abi3t-macosx_11_0_arm64.whl", hash = "sha256:7eb682f8707a31e01ef41ca176fe5f46ce81dc779c17e5b66366a37ac927d611", size = 1846212, upload-time = "2026-11-05T03:34:21.818Z" },
+    { url = "https://files.pythonhosted.org/packages/12/13/88691aac9fb8976cc7119f69c9606f12956e31e666e9319e9debc8099ec5/alai_core-0.1.0-cp315-abi3.abi3t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:caa423a74e24299f93f0a7ec635dd673a4195e1a9a007e85851a26b8d37ac6fc", size = 1903433, upload-time = "2026-11-05T03:34:23.987Z" },
+    { url = "https://files.pythonhosted.org/packages/31/b8/6f869b51b458bdb3991d73267ed0a1841a61526ed84b28701ca85bd2c44d/alai_core-0.1.0-cp315-abi3.abi3t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:36d14620f287d10aa7cde028a8a575bfb1f31b74bf4c9298d3f496cbe3313f79", size = 1986265, upload-time = "2026-11-05T03:34:25.671Z" },
+    { url = "https://files.pythonhosted.org/packages/88/66/7d315cd36be88a7c15a81d15320e9ab91530196263a6c614c580d84f9809/alai_core-0.1.0-cp315-abi3.abi3t-musllinux_1_2_aarch64.whl", hash = "sha256:70e2a7db113c34baff26bcdb373ce2bba78be96d214a598be8d266dd7a34f8c2", size = 1974621, upload-time = "2026-11-05T03:34:27.834Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/28/0a084bdced78fdc3e3f4f9a57f7512df11b1ba1df679bf58f7c38534cb7d/alai_core-0.1.0-cp315-abi3.abi3t-musllinux_1_2_x86_64.whl", hash = "sha256:44e5dbf01876c9270ed1f18d4c3b89026c9ca923a274b4ade3844b4edc828b6f", size = 2072100, upload-time = "2026-11-05T03:34:29.646Z" },
+    { url = "https://files.pythonhosted.org/packages/02/31/b7f3871880b9aef85c0624e28f7f0674928127f83e73cdbf948252b369a0/alai_core-0.1.0-cp315-abi3.abi3t-win_amd64.whl", hash = "sha256:19f58e8686bff549e5458913427d5d3fed68bb2d5d9d83cf59880631ecf0c43a", size = 1871260, upload-time = "2026-11-05T03:34:31.56Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/aa/926341ef39c7514fdab490f92e36a575ab5f82f1f4fccf12250ad18e8535/alai_core-0.1.0-cp315-abi3.abi3t-win_arm64.whl", hash = "sha256:f112ddca991cccdb6bfa10a7d2576aa51ba86916b13ea4c1fb081cbc5c9e92b8", size = 1774321, upload-time = "2026-11-05T03:34:33.245Z" },
+]
 
 [[package]]
 name = "alai-doc"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "alai" },
     { name = "alai-core" },
+    { name = "alai-sh" },
     { name = "textual" },
 ]
 
@@ -56,8 +70,8 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alai", git = "https://github.com/alai-sh/alai-cli?rev=5a618e08518d911121143d82fd63bfd59da12216" },
     { name = "alai-core" },
+    { name = "alai-sh", specifier = "~=0.1.0" },
     { name = "textual", specifier = ">=8.2" },
 ]
 
@@ -78,6 +92,33 @@ docs = [
 test = [
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-xdist" },
+]
+
+[[package]]
+name = "alai-sh"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "alai-core" },
+    { name = "argcomplete" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f7/ee/0f132b5b417bf9e98a6a441fa1440c61fca591c93044bfb795905d1112cf/alai_sh-0.1.0.tar.gz", hash = "sha256:50e6b2a9cd9215d3c08566c2a410db2bbf6b1b2f314dac79589454228e203e89", size = 182536, upload-time = "2026-11-05T07:16:54.311Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0a/4e/290254b589588f1aff632be6ed5b44ef2d4ddbde1ef5f6726f988e0a40bd/alai_sh-0.1.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:0a66976f2af7620efe24fae98f2ae6ba77a601f938c74ab3cd8ddfde31a31bd1", size = 2777269, upload-time = "2026-11-05T07:16:24.196Z" },
+    { url = "https://files.pythonhosted.org/packages/34/92/35f12d3e46ce573bf7df47a1d24de74d54f7e6f730883377b47eb1d499e2/alai_sh-0.1.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:c42bd7134573f97159612b2128ffe903d7b322ae5d527384b90c41f8817d33c9", size = 2864089, upload-time = "2026-11-05T07:16:26.354Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/02/1a577a657a1e7d7ed405d932e5052c761b75f110aecb3efec93b8684fc62/alai_sh-0.1.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3188a6930dcd3d2b1cccf2ec49d3510d04cf6235ed1875c7d2a84529a061d820", size = 3023418, upload-time = "2026-11-05T07:16:28.202Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/79/fbd8f708811346ebaef72aceb97d82b8b3c4aa98185db96ea93031622814/alai_sh-0.1.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:3c3ca8cd0fe479f57ce05d456db4f2b9da000ad7a8b969acfe784fa2fc9784f3", size = 2948537, upload-time = "2026-11-05T07:16:30.609Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/bb/74e4973d3baea5346e9d749e219731d20795c2e8a4e12e936ea84acaa55b/alai_sh-0.1.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:52b45774844ea83dc2537d1bbe52f7064f9ca7d30440bd78befde44549f93040", size = 3154869, upload-time = "2026-11-05T07:16:32.328Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/7e/4a18e44ab7a5ead5782a82dcb7741404009ccb3388cc59e954c72eb8dda5/alai_sh-0.1.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:32f9b5d9f61a1de836ded2674a28df0a02ff9ef0df4dc9bd3abe8c19d305e19b", size = 2770098, upload-time = "2026-11-05T07:16:34.131Z" },
+    { url = "https://files.pythonhosted.org/packages/bf/67/0715431d07d813bf71bff5e717e91cd5593b3a329640fdfde6fd3a00ac48/alai_sh-0.1.0-cp314-cp314t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b1bccbafe61c509fa7c5a3378484035145ebfb4d67f0f79f20a504b139bb29fc", size = 2855941, upload-time = "2026-11-05T07:16:36.225Z" },
+    { url = "https://files.pythonhosted.org/packages/58/70/815451778b33394db3e97b7b2316a4e463d2af05a9ab6936f8aa75d26dc2/alai_sh-0.1.0-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c596301d05923d408890034b4f10a09f21891ae4fbf6c4da07e9d179475f7a2f", size = 3015904, upload-time = "2026-11-05T07:16:38.339Z" },
+    { url = "https://files.pythonhosted.org/packages/5e/3a/a01911ae497523f0cea4aa80920f6b6d980e712a3a6d6637554ad78ed0f7/alai_sh-0.1.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:c0b5f28ac812a0f26ba9cc20389b788f6231c1251ba970ff4ffc4d4e2d282f6e", size = 2942215, upload-time = "2026-11-05T07:16:40.384Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/ba/347061d430163eaa866fa850801c83fb07d92cafb4230ae0a84ec8f21b41/alai_sh-0.1.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:e6e060d47fde032f738f2d1017b1804554898aec9b9d725bab5209dec8f9f932", size = 3149250, upload-time = "2026-11-05T07:16:42.322Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/9a/5437f1109ac6bf69a150c86c6569157fd20c670d9bc29eb6165654ca4d9a/alai_sh-0.1.0-cp315-abi3.abi3t-macosx_11_0_arm64.whl", hash = "sha256:4c1c9eee2f0ee5d6e0fb8eba02c9c2a0ed685e86727b585accf28acb14ea3961", size = 2772015, upload-time = "2026-11-05T07:16:44.284Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/dd/baec992eca6355b19614f0496e7f04c725e06aa2af289bb7b12401bf6f76/alai_sh-0.1.0-cp315-abi3.abi3t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d8be643417409fcb7c593d7ed9978298e912813e9e503dfef65de0ff6640e887", size = 2858546, upload-time = "2026-11-05T07:16:46.243Z" },
+    { url = "https://files.pythonhosted.org/packages/45/13/479e185fd3c623579ede96b2fe1f8129639895a11486be8b635eca20ec4d/alai_sh-0.1.0-cp315-abi3.abi3t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a378d0bb1bab0cc18aa34af02746727bc3c39a081783903dee30cd7c14b51607", size = 3019198, upload-time = "2026-11-05T07:16:48.203Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/4e/b14f5b666c9074090ef7827d758b5437d13cdd581a7ec034f3476e831c35/alai_sh-0.1.0-cp315-abi3.abi3t-musllinux_1_2_aarch64.whl", hash = "sha256:e3c3c5ba5b56ce94dfb95a0d4035120a719728561e0a85c4c019bf2f5619a451", size = 2943501, upload-time = "2026-11-05T07:16:50.521Z" },
+    { url = "https://files.pythonhosted.org/packages/92/2c/7ecae401eb1cc4d92821029fa449e6d3cebb92f2936263c98fd36c400b9e/alai_sh-0.1.0-cp315-abi3.abi3t-musllinux_1_2_x86_64.whl", hash = "sha256:81e8a8e6fdbc2ab1d1b7327087a0a60e71d236107f6681e8f62ddee8f1e8e980", size = 3152452, upload-time = "2026-11-05T07:16:52.685Z" },
 ]
 
 [[package]]
