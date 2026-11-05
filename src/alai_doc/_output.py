@@ -1,8 +1,8 @@
 # Copyright: (c) 2026, Jordan Borean (@jborean93) <jborean93@gmail.com>
 # MIT License (see LICENSE or https://opensource.org/licenses/MIT)
 
-"""Messages to stderr: warnings unless ``-q``, debug lines with ``-v``, trace lines with ``-vv``; and the terminal's
-background, light or dark, for the viewer's theme."""
+"""Messages to stderr: errors, debug lines with ``-v`` and trace lines with ``-vv``; and the terminal's background,
+light or dark, for the viewer's theme."""
 
 from __future__ import annotations
 
@@ -15,29 +15,19 @@ color = "auto"
 """``--color``: ``auto``, ``always`` or ``never``."""
 
 BOLD = "1"
-DIM = "2"
-ITALIC = "3"
-UNDERLINE = "4"
 RED = "31"
-GREEN = "32"
-YELLOW = "33"
-BLUE = "34"
-MAGENTA = "35"
-CYAN = "36"
-WHITE = "37"
 
 
-def color_enabled(*, stdout: bool = False) -> bool:
-    """Whether to colour stderr, or stdout with ``stdout``: ``--color always`` or ``never`` if given; else not with
-    ``NO_COLOR``, and always with ``FORCE_COLOR`` (``NO_COLOR`` winning if both are set), and otherwise on a terminal
-    that isn't ``TERM=dumb``."""
+def color_enabled() -> bool:
+    """Whether to colour stderr: ``--color always`` or ``never`` if given; else not with ``NO_COLOR``, and always with
+    ``FORCE_COLOR`` (``NO_COLOR`` winning if both are set), and otherwise on a terminal that isn't ``TERM=dumb``."""
     if color != "auto":
         return color == "always"
     if os.environ.get("NO_COLOR"):
         return False
     if os.environ.get("FORCE_COLOR"):
         return True
-    return (sys.stdout if stdout else sys.stderr).isatty() and os.environ.get("TERM") != "dumb"
+    return sys.stderr.isatty() and os.environ.get("TERM") != "dumb"
 
 
 _light: bool | None = None
@@ -97,9 +87,9 @@ def terminal_background() -> bool | None:
     return 0.2126 * red + 0.7152 * green + 0.0722 * blue > 0.5
 
 
-def styled(text: str, *codes: str, stdout: bool = False) -> str:
-    """``text`` in the given styles (``BOLD``, ``GREEN``…), when colour is on for stderr, or stdout with ``stdout``."""
-    if not text or not codes or not color_enabled(stdout=stdout):
+def styled(text: str, *codes: str) -> str:
+    """``text`` in the given styles (``BOLD``, ``RED``), when colour is on for stderr."""
+    if not text or not codes or not color_enabled():
         return text
     return f"\x1b[{';'.join(codes)}m{text}\x1b[0m"
 
@@ -110,11 +100,6 @@ def _write(text: str) -> None:
 
 def error(message: str) -> None:
     _write(f"{styled('error', RED, BOLD)}: {message}")
-
-
-def warn(message: str) -> None:
-    if verbosity >= 0:
-        _write(f"{styled('warning', YELLOW, BOLD)}: {message}")
 
 
 def debug(message: str) -> None:

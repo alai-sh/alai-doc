@@ -44,15 +44,12 @@ def run(
     """Open ``name`` in the viewer, 100 by 45 unless ``size`` says otherwise, and run ``steps`` on it."""
     from alai_doc._alai import Alai
     from alai_doc._doc_model import load
-    from alai_doc._doc_view import DocViewer, _Place
+    from alai_doc._doc_view import DocViewer
 
     alai = Alai(quiet=True)
 
     async def main() -> None:
-        loaded = load(alai, name, types)
-        plugin = loaded.plugins[0][0]
-        place = _Place(f"{loaded.collection}.{plugin.name}", (plugin.type,))
-        app = DocViewer(alai, loaded, None, place)
+        app = DocViewer(alai, load(alai, name, types))
         async with app.run_test(size=size) as pilot:
             await pilot.pause()
             await steps(app, pilot)
@@ -386,7 +383,6 @@ def test_role_entry_points(project: World) -> None:
         await pilot.pause()
         assert focused(app) == "[Entry point install]"
         assert "tasks_from: install" in screen(app)
-        assert "tasks_from: install" in screen(app)
         # Both have a thing_name, and the link goes to the entry point it names.
         await app.run_action("goto('install:thing_name')")
         await pilot.pause()
@@ -468,6 +464,21 @@ def test_link_that_fails(project: World, monkeypatch: pytest.MonkeyPatch) -> Non
         # Still where it was, with nothing in history to go forward to.
         assert app.history[app.at].fqcn == "ns.coll.thing"
         assert len(app.history) == 1
+
+    run("ns.coll.thing", steps, types=("module",))
+
+
+def test_loading_says_what_alai_does(project: World) -> None:
+    async def steps(app: DocViewer, pilot: Pilot[None]) -> None:
+        page = app.query_one("#page")
+        # As alai is asked while a page loads, from the worker's thread.
+        app.alai.status("Asking alai for other.coll")
+        page.loading = True
+        await pilot.pause()
+        assert "Asking alai for other.coll" in screen(app)
+        page.loading = False
+        await pilot.pause()
+        assert "Asking alai for other.coll" not in screen(app)
 
     run("ns.coll.thing", steps, types=("module",))
 
@@ -565,9 +576,7 @@ def test_view_quiets_alai(project: World, monkeypatch: pytest.MonkeyPatch) -> No
         seen.append((_output.verbosity, alai.quiet))
 
     monkeypatch.setattr(App, "run", run)
-    plugin = types.SimpleNamespace(name="thing", type="module")
-    located = types.SimpleNamespace(latest=None)
-    loaded = types.SimpleNamespace(collection="ns.coll", plugins=[(plugin, None)], located=located)
+    loaded = types.SimpleNamespace(collection="ns.coll", plugin=types.SimpleNamespace(name="thing", type="module"))
     assert _doc_view.view(alai, _t.cast("_t.Any", loaded)) == 0
     assert seen == [(-1, True)]
     assert (_output.verbosity, alai.quiet) == (0, False)

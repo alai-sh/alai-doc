@@ -17,7 +17,7 @@ from pathlib import Path
 
 from ._alai import BUILTIN, DOWNLOADED, EDA_BUILTIN, INSTALLED, LEGACY, LOCKED, PROJECT, Alai, Located
 from ._common import Error, Record
-from ._markup import Segment, markup, or_list
+from ._markup import Segment, and_list, markup, or_list
 from ._output import debug, home_path
 
 if _t.TYPE_CHECKING:
@@ -32,7 +32,7 @@ SUPPORT_MARKS = {"full": "✓", "partial": "◐", "none": "✗", "N/A": "n/a"}
 """How an attribute's ``support`` is shown in its badge."""
 NBSP = "\u00a0"
 """Joins pieces of a line that wrapping mustn't split, such as a choice and its ``(default)``; shown as a space."""
-SOURCE_ORDER = ("vars", "keyword", "cli", "env", "ini")
+_SOURCE_ORDER = ("vars", "keyword", "cli", "env", "ini")
 """Where a plugin option can be set, highest precedence first, as ansible-core's
 ``ConfigManager.get_config_value_and_origin`` reads them, after a task's own arguments."""
 
@@ -44,23 +44,25 @@ class NotFound(Error):
 class Loaded(Record):
     """A plugin's docs, ready to show, with its doc fragments applied."""
 
-    __slots__ = ("collection", "located", "others", "plugins", "redirects")
+    __slots__ = ("collection", "docs", "located", "others", "plugin", "redirects")
 
     def __init__(
         self,
         collection: str,
-        plugins: list[tuple[ape.Plugin, ape.PluginDocs | None]],
+        plugin: ape.Plugin,
+        docs: ape.PluginDocs | None,
         located: Located,
         redirects: list[str],
-        others: list[tuple[str, str]] | None = None,
+        others: list[tuple[str, str]],
     ) -> None:
         self.collection = collection
-        self.plugins = plugins
-        """The plugin, as a one-item list."""
+        self.plugin = plugin
+        self.docs = docs
+        """Its docs with every fragment applied, or None for a role without an argument spec."""
         self.located = located
         self.redirects = redirects
         """The names asked for that redirected here, in order."""
-        self.others = others or []
+        self.others = others
         """The other types of plugin the name asked for is, and the name for each, for the viewer to link to."""
 
 
@@ -132,9 +134,8 @@ def load(alai: Alai, name: str, types: _c.Sequence[str] = ()) -> Loaded:
 
 def _check_index(alai: Alai, name: str, types: _c.Sequence[str]) -> None:
     """Fail as ``load`` would, without downloading the collection: if no index's plugin index has ``name``, or none
-    of ``types``, or more than one type and no ``types`` to choose. Nothing, if
-    there's no plugin index to tell. Only to check a name before downloading, as what a page shows comes from the
-    collection itself."""
+    of ``types``, or more than one type and no ``types`` to choose. Nothing, if there's no plugin index to tell. Only
+    to check a name before downloading, as what a page shows comes from the collection itself."""
     lines = alai.find(name, exact=True)
     if lines is None:
         return
@@ -245,23 +246,20 @@ def _follow(alai: Alai, hop: _Hop, short: str, kind: str, others: list[tuple[str
         if redirect in seen or len(seen) > _MAX_REDIRECTS:
             raise Error(f"{seen[0]} redirects in a loop: {' → '.join([*seen, redirect])}")
         parts = redirect.split(".")
-        collection = BUILTIN if ".".join(parts[:2]) == LEGACY else ".".join(parts[:2])
-        if not alai.has_version(collection) and alai.find(redirect, exact=True, types=(kind,)) == []:
+        legacy = ".".join(parts[:2]) == LEGACY
+        collection = BUILTIN if legacy else ".".join(parts[:2])
+        short = ".".join(parts[2:])
+        # The plugin index has ansible.builtin's plugins under that name, not ansible.legacy's.
+        if not alai.has_version(collection) and alai.find(f"{collection}.{short}", exact=True, types=(kind,)) == []:
             raise NotFound(f"{seen[-1]} redirects to {redirect}, which no index's plugin index has")
         located = alai.locate(collection)
         if located is None:
             raise NotFound(f"{seen[-1]} redirects to {redirect}, and no index has the collection {collection}")
-        hop = _Hop(collection, located, alai.read(located), legacy=".".join(parts[:2]) == LEGACY)
-        short = ".".join(parts[2:])
+        hop = _Hop(collection, located, alai.read(located), legacy=legacy)
 
-    lookup = ape.fragment_lookup(_fragment_sources(alai, hop.extracted, [plugin]))
-    return Loaded(hop.name, [(plugin, _applied(plugin, lookup))], hop.located, seen, others)
-
-
-def _applied(plugin: ape.Plugin, lookup: ape.FragmentLookup) -> ape.PluginDocs | None:
-    """The plugin's docs with every fragment ``lookup`` has applied, labelled with the collection and, for a module,
-    shaped as extraction says (``PluginDocs.collection`` and ``module``)."""
-    return plugin.docs.apply_fragments(lookup) if plugin.docs is not None else None
+    lookup = ape.fragment_lookup(_fragment_sources(alai, hop.extracted, plugin))
+    docs = plugin.docs.apply_fragments(lookup) if plugin.docs is not None else None
+    return Loaded(hop.name, plugin, docs, hop.located, seen, others)
 
 
 def _not_found(asked: str, hop: _Hop, types: list[str]) -> str:
@@ -275,25 +273,22 @@ def _not_found(asked: str, hop: _Hop, types: list[str]) -> str:
     return f"{shown} has no plugin {asked}{kind}{also}"
 
 
-def _fragment_sources(alai: Alai, extracted: ape.Collection, plugins: list[ape.Plugin]) -> list[ape.Collection]:
-    """The collections the plugins' doc fragments can come from: their own, ansible.builtin, and any other collection
+def _fragment_sources(alai: Alai, extracted: ape.Collection, plugin: ape.Plugin) -> list[ape.Collection]:
+    """The collections the plugin's doc fragments can come from: its own, ansible.builtin, and any other collection
     they name, found as the plugin's own is: installed, locked, cached, or else downloaded into the cache, as a
     plugin's docs aren't whole without them. One that can't be found, or fetched offline, is left out, and the page
     says what isn't shown."""
     sources = [extracted]
-    if not any(p.docs is not None and (p.docs.fragments or p.docs.return_fragments) for p in plugins):
+    docs = plugin.docs
+    if docs is None or not (docs.fragments or docs.return_fragments):
         # Nothing to apply, so no collection to find, as roles and many plugins have none.
         return sources
     own = f"{extracted.namespace}.{extracted.name}"
-    wanted = {
-        ".".join(f.split(".")[:2])
-        for p in plugins
-        if p.docs is not None
-        for f in (*p.docs.fragments, *p.docs.return_fragments)
-        if f.count(".") >= 2
-    } - {own, BUILTIN}
-    # ansible.builtin's are the ones a short name such as files means.
-    names = [*([BUILTIN] if own != BUILTIN else []), *sorted(wanted)]
+    fragments = (*docs.fragments, *docs.return_fragments)
+    wanted = {".".join(f.split(".")[:2]) for f in fragments if f.count(".") >= 2} - {own, BUILTIN}
+    # ansible.builtin's are the ones a short name such as files means, so it's only fetched and read when one is named.
+    builtin = own != BUILTIN and any(f.count(".") < 2 or f.startswith((f"{BUILTIN}.", f"{LEGACY}.")) for f in fragments)
+    names = [*([BUILTIN] if builtin else []), *sorted(wanted)]
     alai.prefetch(names)
 
     def read(name: str) -> ape.Collection | None:
@@ -341,33 +336,103 @@ def type_name(option: dict[str, object]) -> str:
     return f"{kind}[{_TYPE_NAMES.get(elements, elements)}]" if kind == "list" and elements else kind
 
 
-def entries_under(option: dict[str, object], key: str) -> dict[str, dict[str, object]]:
-    """The options, suboptions or return values under ``key``, sorted by name as ansible-doc lists them."""
-    return {k: as_map(v) for k, v in sorted(as_map(option.get(key)).items()) if isinstance(v, dict)}
+def as_entries(value: object) -> dict[str, dict[str, object]]:
+    """Options, suboptions, return values or attributes read from YAML, by name as ansible-doc sorts them, or none for
+    anything else."""
+    return {k: as_map(v) for k, v in sorted(as_map(value).items()) if isinstance(v, dict)}
 
 
-def suboptions_of(option: dict[str, object]) -> dict[str, dict[str, object]]:
-    """A module option's ``suboptions``, or a role's ``options``."""
-    return entries_under(option, "suboptions") or entries_under(option, "options")
+def default_text(option: dict[str, object]) -> str | None:
+    """The option's default as YAML shows it, or None when it has none."""
+    default = option.get("default")
+    return yaml_value(default) if default is not None else None
+
+
+def choices_of(option: dict[str, object]) -> list[tuple[str, str, bool]]:
+    """Each choice as YAML shows it, what it means, which only a mapping of choices says, and whether it's the
+    default."""
+    default = default_text(option)
+    choices = option.get("choices")
+    if isinstance(choices, dict):
+        described = as_map(choices).items()
+        return [(yaml_value(v), " ".join(paragraphs_of(d)), yaml_value(v) == default) for v, d in described]
+    return [(yaml_value(v), "", yaml_value(v) == default) for v in as_list(choices)]
+
+
+def sources_of(option: dict[str, object]) -> list[tuple[str, list[tuple[str, str]]]]:
+    """Where a plugin option can be set, each kind (``var``, ``env``, ``ini``...) with its settings, highest precedence
+    first: where each is set, and that it's deprecated, or an empty string when it isn't."""
+    out: list[tuple[str, list[tuple[str, str]]]] = []
+    for kind in _SOURCE_ORDER:
+        entries = [as_map(e) for e in as_list(option.get(kind)) if isinstance(e, dict)]
+        if not entries:
+            continue
+        # Highest precedence first: within a kind, the last one listed wins.
+        settings: list[tuple[str, str]] = []
+        for entry in reversed(entries):
+            if kind == "ini":
+                where = f"[{as_text(entry.get('section') or 'defaults')}] {as_text(entry.get('key'))}"
+            else:
+                where = as_text(entry.get("name"))
+            note = ""
+            if isinstance(gone := entry.get("deprecated"), dict):
+                removed = as_text(as_map(gone).get("removed_in") or as_map(gone).get("version"))
+                note = "deprecated" + (f", removed in {removed}" if removed else "")
+            settings.append((where, note))
+        out.append((kind.removesuffix("s"), settings))
+    return out
+
+
+def support_text(attribute: dict[str, object]) -> str | None:
+    """An attribute's ``platforms`` or ``membership``, a list or text, which say what it supports in place of
+    ``support``; None without either."""
+    for key in ("platforms", "membership"):
+        if (values := attribute.get(key)) is not None:
+            return ", ".join(as_text(v) for v in as_list(values)) if isinstance(values, list) else as_text(values)
+    return None
+
+
+def kind_text(plugin: ape.Plugin, documentation: dict[str, object]) -> str:
+    """The plugin's type, and for a callback which kind it is: ``stdout callback``."""
+    callback = as_text(documentation.get("type")) if plugin.type == "callback" else ""
+    return f"{callback} callback" if callback else plugin.type
+
+
+def not_shown(docs: ape.PluginDocs, quote: str = "") -> str | None:
+    """The header's warning for the doc fragments that couldn't be applied, each name in ``quote`` marks, or None when
+    every one was."""
+    missing = sorted({*docs.fragments, *docs.return_fragments})
+    if not missing:
+        return None
+    one = len(missing) == 1
+    names = and_list([f"{quote}{m}{quote}" for m in missing])
+    return (
+        f"Not shown: what the doc {'fragment' if one else 'fragments'} {names} {'adds' if one else 'add'}, which "
+        + "couldn't be found or read without running code."
+    )
 
 
 def origin_text(located: Located) -> str:
-    """Where the docs came from, for the header."""
+    """Where the docs came from, for the header, and the latest version when the copy is older."""
     shown = f"{located.name} {located.version}" if located.version else located.name
     if located.name in (BUILTIN, EDA_BUILTIN):
         tool = "ansible-core" if located.name == BUILTIN else "ansible-rulebook"
         fetched = ", downloaded into the cache" if located.origin == DOWNLOADED else ""
-        return f"{tool} {located.version}, the latest release{fetched}."
-    if located.origin == INSTALLED:
-        return f"{shown}, installed at {home_path(located.path)}."
-    if located.origin == PROJECT:
-        return f"{shown}, the collection project at {home_path(located.path)}."
-    if located.origin == LOCKED:
+        text = f"{tool} {located.version}, the latest release{fetched}"
+    elif located.origin == INSTALLED:
+        text = f"{shown}, installed at {home_path(located.path)}"
+    elif located.origin == PROJECT:
+        text = f"{shown}, the collection project at {home_path(located.path)}"
+    elif located.origin == LOCKED:
         # A locked directory source is that directory, not the cache.
-        return f"{shown}, the locked version at {home_path(located.path)}."
-    if located.origin == DOWNLOADED:
-        return f"{shown}, downloaded into the cache."
-    return f"{shown}, from the cache."
+        text = f"{shown}, the locked version at {home_path(located.path)}"
+    elif located.origin == DOWNLOADED:
+        text = f"{shown}, downloaded into the cache"
+    else:
+        text = f"{shown}, from the cache"
+    if located.latest:
+        text += f", but {located.latest} is the latest"
+    return text + "."
 
 
 def deprecation_text(deprecated: object) -> str | None:
@@ -385,7 +450,9 @@ def deprecation_text(deprecated: object) -> str | None:
 
 def nested_entries(entry: dict[str, object], *, returns: bool) -> dict[str, dict[str, object]]:
     """A return value's ``contains``, or an option's ``suboptions`` (a role's ``options``)."""
-    return entries_under(entry, "contains") if returns else suboptions_of(entry)
+    if returns:
+        return as_entries(entry.get("contains"))
+    return as_entries(entry.get("suboptions")) or as_entries(entry.get("options"))
 
 
 _RST_CODE_RE = re.compile(r"``(.+?)``")
@@ -437,7 +504,7 @@ _TASK_EXTENSIONS = ("", ".yml", ".yaml", ".json")
 def readme(loaded: Loaded) -> tuple[Path, str] | None:
     """A role's ``README.md`` and what's in it, which Galaxy shows for a role and alai-core doesn't read: for most
     roles their only docs. None for anything else, or if it can't be read."""
-    plugin = loaded.plugins[0][0]
+    plugin = loaded.plugin
     if plugin.type != "role":
         return None
     path = Path(loaded.located.path, "roles", plugin.name, "README.md")
@@ -504,7 +571,7 @@ def split_arguments(
     """A filter's or test's input; the arguments a lookup, filter or test takes by position, in order; and the options
     it takes by name, each keyed by how it's shown. A lookup's positional arguments are its ``_terms``; a filter's or
     test's are those its ``positional`` names, a list or a comma-separated string. Other types have only options."""
-    options = entries_under(documentation, "options")
+    options = as_entries(documentation.get("options"))
     if plugin_type not in ("lookup", "filter", "test"):
         return {}, {}, options
     first = _INPUTS.get(plugin_type)

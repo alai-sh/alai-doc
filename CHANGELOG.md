@@ -6,6 +6,9 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing has been released yet.
+## [0.1.0] - 2026-11-05
 
-[Unreleased]: https://github.com/alai-sh/alai-doc/commits/main
+The first release.
+
+[Unreleased]: https://github.com/alai-sh/alai-doc/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/alai-sh/alai-doc/releases/tag/v0.1.0

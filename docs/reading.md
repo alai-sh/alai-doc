@@ -24,7 +24,9 @@ have what they're named for, and a role with a README has it in a README tab.
 
 Names of other plugins and options in the docs are links. Clicking one goes
 to that plugin or option, and the viewer keeps a history to go back and
-forward through, as a browser does.
+forward through, as a browser does. While a plugin in another collection
+loads, the page says what alai is doing, such as downloading the collection
+or reading its docs.
 
 | Key | What it does |
 |---|---|

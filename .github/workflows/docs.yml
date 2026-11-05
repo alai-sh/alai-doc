@@ -28,9 +28,6 @@ permissions:
   contents: read
 
 env:
-  # alai and alai-core are built from source, and each one's rust-toolchain.toml makes rustup install that Rust as the
-  # build starts. Built at once, two rustups download into the same directory and fail, so build one at a time.
-  UV_CONCURRENT_BUILDS: "1"
 
 jobs:
   build:
@@ -46,7 +43,7 @@ jobs:
         with:
           cache-suffix: docs
 
-      # tox and the tools only, as tox builds alai-doc itself, and alai and alai-core from source with it.
+      # tox and the tools only, as tox builds alai-doc itself.
       - name: Build the docs and check their links
         run: |
           uv sync --no-install-project

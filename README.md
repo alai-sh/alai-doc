@@ -1,15 +1,32 @@
 # alai-doc
 
-> **Warning** alai-doc is a proof of concept. Nothing is released, and
-> anything can change.
+[![PyPI](https://img.shields.io/pypi/v/alai-doc)](https://pypi.org/project/alai-doc/)
+[![CI](https://github.com/alai-sh/alai-doc/actions/workflows/ci.yml/badge.svg)](https://github.com/alai-sh/alai-doc/actions/workflows/ci.yml)
 
 alai-doc shows the documentation of a plugin or role in an Ansible
 collection without a browser. The docs open in a viewer on a terminal, and
 are printed as Markdown anywhere else.
 
+> **Preview:** alai-doc is released in preview, as a 0.x version under
+> [semantic versioning](https://semver.org/). The viewer and the command line
+> can still change as they're worked out, so a release that breaks something
+> bumps the minor version, from 0.1 to 0.2, and lists the change in the
+> [changelog](https://github.com/alai-sh/alai-doc/blob/main/CHANGELOG.md). A
+> patch release, such as 0.1.1, only fixes bugs.
+
 ```console
 $ alai-doc ansible.builtin.copy
 $ alai-doc win_copy --output-format markdown
+```
+
+## Installing
+
+alai-doc is published on [PyPI](https://pypi.org/project/alai-doc/), and
+installs alai with it. When it's used often, [uv](https://docs.astral.sh/uv/)
+can install it as a tool so `alai-doc` is on the `PATH`.
+
+```console
+$ uv tool install alai-doc
 ```
 
 The [documentation](https://alai.sh/alai-doc/) covers
@@ -19,21 +36,12 @@ The [documentation](https://alai.sh/alai-doc/) covers
 
 ## Developing
 
-Building it needs `cargo` as well as [uv](https://docs.astral.sh/uv/), as
-alai and alai-core are built from source until they're on PyPI.
+It is built and checked with [uv](https://docs.astral.sh/uv/).
 
 ```console
 $ uv sync
 $ uv run tox run -f sanity
 $ uv run tox run -f py314
-```
-
-alai is pinned to a commit of alai in `[project] dependencies`, as
-alai pins alai-core. To work on both at once, point it at a local
-checkout in `[tool.uv.sources]`.
-
-```toml
-alai-sh = { path = "../alai", editable = true }
 ```
 
 The docs at [alai.sh/alai-doc](https://alai.sh/alai-doc/) are built from
