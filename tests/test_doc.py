@@ -329,6 +329,16 @@ def test_installed_located_once(world: World, capsys: pytest.CaptureFixture[str]
     assert "--no-download" in asked[0]
 
 
+def test_locked_shows_path(world: World, capsys: pytest.CaptureFixture[str]) -> None:
+    """A locked collection can be a directory source outside the cache, so its path is shown."""
+    assert world.collections["ns.coll"] is not None
+    world.collections["ns.coll"].update(origin="locked", latest=None)
+    world.save()
+    assert doc("-t", "module", "ns.coll.thing") == 0
+    path = world.collections["ns.coll"]["path"]
+    assert f"- Version: ns.coll 2.0.0, the locked version at {path}." in out(capsys)
+
+
 def test_cached_located_again(world: World, capsys: pytest.CaptureFixture[str]) -> None:
     assert doc("-t", "module", "ns.coll.thing") == 0
     asked = [r for r in world.runs() if r[:2] == ["collection", "path"] and "ns.coll" in r]

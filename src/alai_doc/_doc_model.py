@@ -363,7 +363,8 @@ def origin_text(located: Located) -> str:
     if located.origin == PROJECT:
         return f"{shown}, the collection project at {home_path(located.path)}."
     if located.origin == LOCKED:
-        return f"{shown}, the locked version, from the cache."
+        # A locked directory source is that directory, not the cache.
+        return f"{shown}, the locked version at {home_path(located.path)}."
     if located.origin == DOWNLOADED:
         return f"{shown}, downloaded into the cache."
     return f"{shown}, from the cache."

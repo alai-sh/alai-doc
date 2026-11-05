@@ -22,10 +22,9 @@ classifiers = [
 ]
 
 dependencies = [
-    # Run as a command (python -m alai), never imported. Its collection path and find output are the interface. A
-    # commit of alai-cli's repository until it's on PyPI, given here rather than in [tool.uv.sources] so installs from
-    # GitHub or the sdist find it too.
-    "alai @ git+https://github.com/alai-sh/alai-cli@5a618e08518d911121143d82fd63bfd59da12216",
+    # Run as a command (python -m alai), never imported. Its collection path and find output are the interface. Patch
+    # releases only, as alai 0.x can change that output in a minor release.
+    "alai-sh ~= 0.1.0",
     # Whatever version alai pins, so docs are read with the alai-core alai uses.
     "alai-core",
     "textual >= 8.2",
