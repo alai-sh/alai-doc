@@ -4,13 +4,17 @@ description: Reading the documentation of Ansible plugins and roles in the termi
 
 # alai-doc
 
-!!! warning "Proof of concept"
-
-    alai-doc is a proof of concept. Nothing is released, and anything can
-    change.
-
 alai-doc is a command line tool that can be used to view the documentation of
 Ansible plugins and roles in the terminal.
+
+!!! warning "Preview"
+
+    alai-doc is released in preview, as a 0.x version under
+    [semantic versioning](https://semver.org/). The viewer and the command
+    line can still change as they're worked out, so a release that breaks
+    something bumps the minor version, from 0.1 to 0.2, and lists the change
+    in the [changelog](https://github.com/alai-sh/alai-doc/blob/main/CHANGELOG.md).
+    A patch release, such as 0.1.1, only fixes bugs.
 
 ```console
 $ alai-doc ansible.builtin.copy
@@ -36,12 +40,12 @@ that isn't on disk yet is downloaded into the cache first.
 
 ## Installing
 
-alai-doc isn't on PyPI yet, so it's installed from its repository. alai is
-built from source as part of the install, which needs
-[cargo](https://www.rust-lang.org/tools/install).
+alai-doc is published on [PyPI](https://pypi.org/project/alai-doc/), and
+installs alai with it. When it's used often, [uv](https://docs.astral.sh/uv/)
+can install it as a tool so `alai-doc` is on the `PATH`.
 
 ```console
-$ uv tool install git+https://github.com/alai-sh/alai-doc
+$ uv tool install alai-doc
 ```
 
 ## What it shows

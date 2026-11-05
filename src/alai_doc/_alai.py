@@ -59,6 +59,8 @@ class Alai:
     def __init__(self, args: _c.Sequence[str] = (), *, quiet: bool = False) -> None:
         self.args = list(args)
         self.quiet = quiet
+        self.status: _c.Callable[[str], None] = lambda _: None
+        """Told what's being asked of alai, or read, that may take a while, for the viewer to say while it waits."""
         self._project: tuple[str | None] | None = None
         self._located: dict[str, Located | str | None] = {}
         self._on_disk: dict[str, bool] = {}
@@ -107,6 +109,7 @@ class Alai:
             reader = {BUILTIN: extract.ansible_core, EDA_BUILTIN: extract.ansible_rulebook}.get(
                 located.name, extract.extract
             )
+            self.status(f"Reading the docs of {located.name}")
             try:
                 collection = reader(located.path, docs=True)
             except (OSError, ValueError) as e:
@@ -120,6 +123,7 @@ class Alai:
         """The plugins ``alai find`` lists for ``query``, ranked, each a plugin index line with its ``fqcn``; None if
         it can't search, as with no plugin index configured."""
         argv = ["find", *(["--exact"] if exact else []), *(a for t in types for a in ("--type", t))]
+        self.status(f"Searching the plugin index for {query}")
         code, out, err = self._run([*argv, "--", query], capture=True)
         if code == 1 and not out.strip():
             return []
@@ -132,6 +136,8 @@ class Alai:
 
     def _collection_path(self, names: list[str], *, download: bool = True) -> dict[str, Located | str | None]:
         argv = ["collection", "path", *([] if download else ["--no-download"])]
+        if download and names:
+            self.status(f"Asking alai for {', '.join(names)}")
         # Only a download has progress worth showing.
         code, out, err = self._run([*argv, "--", *names], capture=self.quiet or not download or not names)
         try:

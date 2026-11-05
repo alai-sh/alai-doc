@@ -15,41 +15,47 @@ import json
 import re
 import typing as _t
 
+from rich.text import Text
 from textual import events, work
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, RenderResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
 from textual.geometry import Region
 from textual.style import Style
 from textual.widget import AwaitMount, Widget
-from textual.widgets import Footer, HelpPanel, Input, Markdown, Static, Tab, Tabs
+from textual.widgets import Footer, HelpPanel, Input, LoadingIndicator, Markdown, Static, Tab, Tabs
 
 from . import _output
 from ._alai import BUILTIN
 from ._common import Error, Record
 from ._doc_model import (
     NBSP,
-    SOURCE_ORDER,
     SUPPORT_MARKS,
     Loaded,
+    as_entries,
     as_list,
     as_map,
     as_text,
     bare,
+    choices_of,
+    default_text,
     deprecation_text,
-    entries_under,
     entry_points,
     input_label,
+    kind_text,
     load,
     nested_entries,
+    not_shown,
     origin_text,
     paragraphs_of,
     path_segment,
     readme,
     rich_text,
+    sources_of,
     split_arguments,
     summary,
+    support_text,
     type_name,
     unnamed_return,
     usage,
@@ -120,9 +126,7 @@ class _Place(Record):
 
 def view(alai: Alai, loaded: Loaded) -> int:
     """Show ``loaded`` in the viewer until it's closed."""
-    plugin = loaded.plugins[0][0]
-    place = _Place(f"{loaded.collection}.{plugin.name}", (plugin.type,))
-    app = DocViewer(alai, loaded, loaded.located.latest, place)
+    app = DocViewer(alai, loaded)
     # Nothing may write to the terminal while the viewer is drawn on it: messages, and alai's progress, are the
     # viewer's.
     verbosity, quiet = _output.verbosity, alai.quiet
@@ -199,6 +203,15 @@ class _Code(_Text):
         super().__init__(text, classes=classes)
         self.language = language
         self.code = code
+
+
+class _Loading(LoadingIndicator):
+    """Over the page while another plugin's docs load: Textual's dots, with what alai is doing under them."""
+
+    def render(self) -> RenderResult:
+        dots = _t.cast("Text", super().render())
+        doing = _t.cast("DocViewer", self.app).doing
+        return Text.assemble(dots, "\n\n", (doing, "dim"), justify="center")
 
 
 class Entry(Vertical, can_focus=True):
@@ -308,9 +321,8 @@ class Entry(Vertical, can_focus=True):
                 blocks.append(Content.assemble(("Sample: ", "dim"), (text, "$text-success")))
         else:
             # The line may be cut short, or cut its default, so it's here whole.
-            default = entry.get("default")
-            if "default" in entry and default is not None:
-                blocks.append(Content.assemble(("Default: ", "dim"), (yaml_value(default), "$text-success")))
+            if (default := default_text(entry)) is not None:
+                blocks.append(Content.assemble(("Default: ", "dim"), (default, "$text-success")))
             blocks.append(_choices(entry))
             extra: list[str] = []
             if aliases := as_list(entry.get("aliases")):
@@ -455,9 +467,12 @@ class Section(Vertical, can_focus=True):
         """Its body, mounted if it waits to be, for what needs what's in it: links to it, and finding."""
         # Not once it's gone, as a page left before it's all mounted is.
         if self.lazy and self.is_attached:
-            if self._mounting is None:
-                self._mounting = self.query_one(".body", Vertical).mount_all(self.body)
-            await self._mounting
+            await self._mount_body()
+
+    def _mount_body(self) -> AwaitMount:
+        if self._mounting is None:
+            self._mounting = self.query_one(".body", Vertical).mount_all(self.body)
+        return self._mounting
 
     def _heading(self) -> Content:
         marker = "[+] " if self.has_class("-closed") else "[-] "
@@ -465,8 +480,8 @@ class Section(Vertical, can_focus=True):
         return Content.assemble((marker, ""), (self.title, "bold $primary"), (" " + "─" * 400, "dim"))
 
     def _set(self, *, closed: bool) -> None:
-        if not closed and self.lazy and self._mounting is None:
-            self._mounting = self.query_one(".body", Vertical).mount_all(self.body)
+        if not closed and self.lazy:
+            self._mount_body()
         self.set_class(closed, "-closed")
         self.query_one(".heading", Static).update(self._heading())
 
@@ -559,12 +574,10 @@ def _flag(entry: dict[str, object], parent: str | None, *, returns: bool) -> lis
         return []
     if entry.get("required") is True:
         return [(f"required in {parent}" if parent else "required", "$text-error")]
-    default = entry.get("default")
-    if "default" in entry and default is not None:
-        shown = yaml_value(default)
-        if len(shown) > _MAX_FLAG - 2:
-            shown = shown[: _MAX_FLAG - 3] + "…"
-        return [("= ", "dim"), (shown, "$text-success")]
+    if (default := default_text(entry)) is not None:
+        if len(default) > _MAX_FLAG - 2:
+            default = default[: _MAX_FLAG - 3] + "…"
+        return [("= ", "dim"), (default, "$text-success")]
     return []
 
 
@@ -577,52 +590,40 @@ def _columns(entries: dict[str, dict[str, object]], parent: str | None, *, retur
 
 
 def _choices(entry: dict[str, object]) -> Content | None:
-    choices = entry.get("choices")
-    default = entry.get("default")
-    mark = yaml_value(default) if "default" in entry and default is not None else None
-    if isinstance(choices, dict):
+    choices = choices_of(entry)
+    if any(text for _, text, _ in choices):
         lines = []
-        for value, description in as_map(choices).items():
-            segments: list[Segment] = [("• ", "dim", None), (yaml_value(value), "option_value", None)]
-            if yaml_value(value) == mark:
+        for value, text, default in choices:
+            segments: list[Segment] = [("• ", "dim", None), (value, "option_value", None)]
+            if default:
                 segments.append((" (default)", "dim", None))
-            if text := " ".join(paragraphs_of(description)):
+            if text:
                 segments += [(": ", None, None), *rich_text(text)]
             lines.append(_content(segments))
         return _join(*lines)
-    values = as_list(choices)
-    if not values:
+    if not choices:
         return None
     segments = [("Choices: ", "dim", None)]
-    for i, value in enumerate(values):
-        segments.append((yaml_value(value), "option_value", None))
-        if yaml_value(value) == mark:
-            segments.append((" (default)", "dim", None))
-        if i < len(values) - 1:
+    for i, (value, _, default) in enumerate(choices):
+        if i:
             segments.append((" · ", "dim", None))
+        segments.append((value, "option_value", None))
+        if default:
+            segments.append((" (default)", "dim", None))
     return _content(segments)
 
 
 def _sources(option: dict[str, object]) -> Content | None:
     """Where a plugin's option can be set, a line per kind, highest precedence first."""
     lines = []
-    for kind in SOURCE_ORDER:
-        entries = [as_map(e) for e in as_list(option.get(kind)) if isinstance(e, dict)]
-        if not entries:
-            continue
-        segments: list[Segment] = [(f"{kind.removesuffix('s'):<8}", "dim", None)]
-        for i, entry in enumerate(reversed(entries)):
+    for kind, settings in sources_of(option):
+        segments: list[Segment] = [(f"{kind:<8}", "dim", None)]
+        for i, (where, note) in enumerate(settings):
             if i:
                 segments.append((", ", None, None))
-            if kind == "ini":
-                where = f"[{as_text(entry.get('section') or 'defaults')}] {as_text(entry.get('key'))}"
-            else:
-                where = as_text(entry.get("name"))
-            deprecated = entry.get("deprecated")
-            segments.append((where, "dim" if isinstance(deprecated, dict) else "option_value", None))
-            if isinstance(deprecated, dict):
-                removed = as_text(as_map(deprecated).get("removed_in") or as_map(deprecated).get("version"))
-                segments.append((" (deprecated" + (f", removed in {removed}" if removed else "") + ")", "dim", None))
+            segments.append((where, "dim" if note else "option_value", None))
+            if note:
+                segments.append((f" ({note})", "dim", None))
         lines.append(_content(segments))
     return _join(*lines) if lines else None
 
@@ -670,7 +671,7 @@ class DocViewer(App[None]):
         Binding("pagedown,right_curly_bracket", "section(1)", "Next section", show=False),
     ]
 
-    def __init__(self, alai: Alai, loaded: Loaded, latest: str | None, place: _Place) -> None:
+    def __init__(self, alai: Alai, loaded: Loaded) -> None:
         # Textual's themes, light or dark as the terminal is, where it shows 256 colours or more; with only 16, which
         # the themes' colours would be squeezed into badly, the terminal's own colours and an ANSI theme.
         self.ansi = _colour_system() not in ("truecolor", "256")
@@ -682,8 +683,10 @@ class DocViewer(App[None]):
             self.theme = "textual-light" if self.light else "textual-dark"
         self.alai = alai
         self.loaded = loaded
-        self.latest = latest
-        self.history = [place]
+        self.doing = ""
+        """What alai is doing for the page being loaded, under the loading indicator."""
+        alai.status = lambda message: setattr(self, "doing", message)
+        self.history = [_Place(f"{loaded.collection}.{loaded.plugin.name}", (loaded.plugin.type,))]
         self.at = 0
         self.found: re.Pattern[str] | None = None
         """What's being found on the page, if anything."""
@@ -704,20 +707,18 @@ class DocViewer(App[None]):
     async def on_mount(self) -> None:
         self.screen.set_class(self.ansi, "-ansi")
         self.theme_changed_signal.subscribe(self, self._theme_changed)
-        await self._show(self.loaded, self.latest, self.history[self.at])
+        await self._show(self.loaded, self.history[self.at])
+
+    def get_loading_widget(self) -> Widget:
+        return _Loading()
 
     # Building a page.
 
-    async def _show(self, loaded: Loaded, latest: str | None, place: _Place) -> None:
-        self.loaded, self.latest = loaded, latest
-        # The type asked for, else the module, as ansible-doc defaults to, else the first.
-        plugin, docs = next(
-            (pd for pd in loaded.plugins if pd[0].type in place.types),
-            next((pd for pd in loaded.plugins if pd[0].type == "module"), loaded.plugins[0]),
-        )
+    async def _show(self, loaded: Loaded, place: _Place) -> None:
+        self.loaded = loaded
         page = self.query_one("#page", VerticalScroll)
         await page.remove_children()
-        widgets = self._widgets(loaded, plugin, docs, latest)
+        widgets = self._widgets(loaded)
         present = [t for t in _TABS if any(w.has_class(f"-tab-{t}") for w in widgets)]
         # Under the header, a lone tab hidden as it has nothing to switch to.
         tabs = Tabs(*(Tab(_TABS[t], id=f"tab-{t}") for t in present), id="tabs")
@@ -726,7 +727,7 @@ class DocViewer(App[None]):
         tabs.can_focus = False
         await page.mount_all([widgets[0], tabs, *widgets[1:]])
         self._switch(present[0])
-        self.sub_title = f"{loaded.collection}.{plugin.name}"
+        self.sub_title = f"{loaded.collection}.{loaded.plugin.name}"
         if place.path:
             await self._jump(place.path, returns=place.returns, entry_point=place.entry_point, remember=False)
         elif place.entry_point:
@@ -805,34 +806,23 @@ class DocViewer(App[None]):
         if tab != self.tab:
             self._switch(tab)
 
-    def _widgets(
-        self,
-        loaded: Loaded,
-        plugin: ape.Plugin,
-        docs: ape.PluginDocs | None,
-        latest: str | None,
-    ) -> list[Widget]:
+    def _widgets(self, loaded: Loaded) -> list[Widget]:
         """The page's header, and what's under it, each with the class of the tab it's in."""
-        widgets = self._parts(loaded, plugin, docs, latest)
+        widgets = self._parts(loaded)
         for widget in widgets[1:]:
             if not any(widget.has_class(f"-tab-{t}") for t in _TABS):
                 widget.add_class("-tab-docs")
         return widgets
 
-    def _parts(
-        self,
-        loaded: Loaded,
-        plugin: ape.Plugin,
-        docs: ape.PluginDocs | None,
-        latest: str | None,
-    ) -> list[Widget]:
+    def _parts(self, loaded: Loaded) -> list[Widget]:
+        plugin, docs = loaded.plugin, loaded.docs
         fqcn = f"{loaded.collection}.{plugin.name}"
         parts = entry_points(plugin, docs, loaded.located) if docs is not None else []
         # A role's header is its main entry point's, and a role without one has only its name.
         documentation = as_map(parts[0][1].documentation) if parts and parts[0][0] in (None, "main") else {}
         short = as_text(documentation.get("short_description")) or plugin.short_description
         found = readme(loaded)
-        widgets: list[Widget] = [self._head(loaded, plugin, docs, documentation, short, latest)]
+        widgets: list[Widget] = [self._head(loaded, documentation, short)]
         if found is not None:
             # Links are followed here, as only some can be.
             widgets.append(Markdown(found[1], open_links=False, classes="readme -tab-readme"))
@@ -912,7 +902,7 @@ class DocViewer(App[None]):
             widgets.append(Section("See also", *[_Bullet(line) for line in seealso]))
         if docs.examples and docs.examples.strip():
             widgets.append(Section("Examples", self._code("yaml", docs.examples), classes="-tab-examples"))
-        returns = entries_under({"returns": docs.returns}, "returns")
+        returns = as_entries(docs.returns)
         if (value := unnamed_return(plugin_type, returns)) is not None:
             described = [_content(rich_text(p)) for p in paragraphs_of(value.get("description"))]
             text = _join(Content.styled(type_name(value), "$text-secondary"), *described, gap="\n\n")
@@ -953,26 +943,15 @@ class DocViewer(App[None]):
         for code in self.query(_Code):
             code.show(self._highlight(code.language, code.code))
 
-    def _head(
-        self,
-        loaded: Loaded,
-        plugin: ape.Plugin,
-        docs: ape.PluginDocs | None,
-        documentation: dict[str, object],
-        short: str | None,
-        latest: str | None,
-    ) -> _Text:
-        collection = loaded.collection
+    def _head(self, loaded: Loaded, documentation: dict[str, object], short: str | None) -> _Text:
+        collection, plugin, docs = loaded.collection, loaded.plugin, loaded.docs
         lines: list[Content | None] = []
         if short:
             lines.append(_content([(p, k or "bold", t) for p, k, t in as_sentence(markup(short))]))
         # Next to what it does, as the name in the border is the one it redirected to.
         if loaded.redirects:
             lines.append(Content(f"Redirected from {and_list(loaded.redirects)}."))
-        origin = origin_text(loaded.located)
-        if latest:
-            origin = f"{origin.rstrip('.')}, but {latest} is the latest."
-        lines.append(Content.styled(origin, "dim"))
+        lines.append(Content.styled(origin_text(loaded.located), "dim"))
         if authors := paragraphs_of(documentation.get("author")):
             lines.append(Content.styled(f"By {and_list(authors)}.", "dim"))
         if (added := documentation.get("version_added")) and as_text(added) != "historical":
@@ -980,16 +959,8 @@ class DocViewer(App[None]):
             lines.append(Content.styled(f"Added in {where} {as_text(added)}.", "dim"))
         if deprecated := deprecation_text(documentation.get("deprecated")):
             lines.append(_content(rich_text(deprecated)).stylize_before("$text-warning"))
-        if docs is not None and (missing := sorted({*docs.fragments, *docs.return_fragments})):
-            what = "fragment" if len(missing) == 1 else "fragments"
-            verb = "adds" if len(missing) == 1 else "add"
-            lines.append(
-                Content.styled(
-                    f"Not shown: what the doc {what} {and_list(missing)} {verb}, which couldn't be found or read without "
-                    + "running code.",
-                    "$text-warning",
-                )
-            )
+        if docs is not None and (missing := not_shown(docs)):
+            lines.append(Content.styled(missing, "$text-warning"))
         # The other types of plugin the name asked for is: a lookup as well as a module, say.
         if loaded.others:
             links: list[Segment] = [("Also a ", "dim", None)]
@@ -1000,14 +971,11 @@ class DocViewer(App[None]):
             lines.append(_content(links))
         head = _Text(_join(*lines), id="head")
         head.border_title = Content.styled(f"{collection}.{plugin.name}", "bold $text-primary")
-        kind = plugin.type
-        if plugin.type == "callback" and (callback := as_text(documentation.get("type"))):
-            kind = f"{callback} callback"
-        head.border_subtitle = Content.styled(kind, "$text-secondary")
+        head.border_subtitle = Content.styled(kind_text(plugin, documentation), "$text-secondary")
         return head
 
     def _badges(self, value: object) -> Content | None:
-        attributes = entries_under({"attributes": value}, "attributes")
+        attributes = as_entries(value)
         if not attributes:
             return None
         parts: list[Segment] = []
@@ -1015,22 +983,8 @@ class DocViewer(App[None]):
             if parts:
                 parts.append(("   ", None, None))
             support = as_text(attribute.get("support"))
-            platforms = attribute.get("platforms")
-            membership = attribute.get("membership")
-            if name == "platform" or platforms is not None:
-                shown = (
-                    ", ".join(as_text(p) for p in as_list(platforms))
-                    if isinstance(platforms, list)
-                    else as_text(platforms)
-                )
-                parts += [(name, None, None), (f" {shown or support}", "option_value", None)]
-            elif membership is not None:
-                shown = (
-                    ", ".join(as_text(m) for m in as_list(membership))
-                    if isinstance(membership, list)
-                    else as_text(membership)
-                )
-                parts += [(name, None, None), (f" {shown}", "option_value", None)]
+            if (values := support_text(attribute)) is not None:
+                parts += [(name, None, None), (f" {values or support}", "option_value", None)]
             else:
                 parts += [
                     (name, None, None),
@@ -1184,16 +1138,16 @@ class DocViewer(App[None]):
     @work(thread=True, exclusive=True)
     def _load(self, place: _Place) -> None:
         page = self.query_one("#page", VerticalScroll)
+        self.doing = f"Loading {place.fqcn}"
         self.call_from_thread(setattr, page, "loading", True)
         try:
             loaded = load(self.alai, place.fqcn, place.types)
-            latest = loaded.located.latest
         except Error as e:
             self.call_from_thread(self._failed, str(e), place)
             return
         finally:
             self.call_from_thread(setattr, page, "loading", False)
-        self.call_from_thread(self._show, loaded, latest, place)
+        self.call_from_thread(self._show, loaded, place)
 
     def _failed(self, message: str, place: _Place) -> None:
         self.notify(message, title=place.fqcn, severity="error")

@@ -31,9 +31,10 @@ PLUGIN_TYPES = (
 
 
 def main(argv: _c.Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
     if args.quiet and args.verbose:
-        args.parser.error("-q/--quiet and -v/--verbose can't be used together")
+        parser.error("-q/--quiet and -v/--verbose can't be used together")
     _output.verbosity = -1 if args.quiet else min(args.verbose, 2)
     _output.color = args.color
 
@@ -105,5 +106,4 @@ def _parser() -> argparse.ArgumentParser:
     alai.add_argument(
         "--index", metavar="NAME=URL", action="append", default=[], help="an index, which can be repeated"
     )
-    parser.set_defaults(parser=parser)
     return parser

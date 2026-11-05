@@ -12,7 +12,7 @@ from alai_doc._alai import Alai
 from alai_doc._cli import main
 from alai_doc._common import EXIT_ERROR, EXIT_NOT_FOUND
 from alai_doc._doc import _code, _escape, _paragraph
-from alai_doc._doc_model import split_arguments, usage
+from alai_doc._doc_model import load, split_arguments, usage
 from alai_doc._markup import markup
 
 
@@ -353,7 +353,7 @@ def test_fragment_not_found(world: World, capsys: pytest.CaptureFixture[str]) ->
     assert doc("-t", "module", "ns.coll.thing") == 0
     assert (
         "- Not shown: what the doc fragment `other.coll.auth` adds, which couldn't be found or read without running "
-        + "code"
+        + "code."
     ) in out(capsys)
 
 
@@ -364,9 +364,11 @@ def test_fragment_built_at_runtime_or_missing(world: World, capsys: pytest.Captu
     lines = out(capsys)
     assert (
         "- Not shown: what the doc fragments `ns.coll.built` and `ns.coll.nowhere` add, which couldn't be found or "
-        + "read without running code"
+        + "read without running code."
     ) in lines
     assert "- **name** · `str`" in lines
+    # Every fragment is the collection's own, so ansible.builtin isn't fetched or read for them.
+    assert [r for r in world.runs() if "ansible.builtin" in r] == []
 
 
 def test_return_fragment(world: World, capsys: pytest.CaptureFixture[str]) -> None:
@@ -382,6 +384,21 @@ def test_one_run_for_the_fragments(world: World, capsys: pytest.CaptureFixture[s
     assert doc("-t", "module", "ns.coll.thing") == 0
     paths = [r for r in world.runs() if r[:2] == ["collection", "path"]]
     assert paths[-1][-2:] == ["ansible.builtin", "other.coll"]
+
+
+def test_status(world: World) -> None:
+    """What may take a while is said as it starts, for the viewer to show while it waits."""
+    alai = Alai()
+    said: list[str] = []
+    alai.status = said.append
+    load(alai, "ns.coll.thing", ["module"])
+    assert said == [
+        "Asking alai for ns.coll",
+        "Reading the docs of ns.coll",
+        "Asking alai for ansible.builtin, other.coll",
+        "Reading the docs of ansible.builtin",
+        "Reading the docs of other.coll",
+    ]
 
 
 def test_settings_passed_on(world: World, capsys: pytest.CaptureFixture[str]) -> None:
@@ -528,17 +545,14 @@ def test_paragraph_start_is_not_markdown() -> None:
     ],
 )
 def test_usage(kind: str, documentation: dict[str, object], expected: list[tuple[str, str, str]]) -> None:
-
     assert usage("ns.c.x", kind, documentation) == expected
 
 
 def test_host_group_vars_isnt_listed_twice() -> None:
-
     assert usage("ansible.builtin.host_group_vars", "vars", {})[0][2].endswith("= ansible.builtin.host_group_vars")
 
 
 def test_positional_as_a_list() -> None:
-
     options: dict[str, object] = {"_input": {}, "a": {}, "b": {}, "c": {}}
     inputs, positional, rest = split_arguments("filter", {"options": options, "positional": ["b", "a"]})
     assert (list(inputs), list(positional), list(rest)) == (["input"], ["b", "a"], ["c"])

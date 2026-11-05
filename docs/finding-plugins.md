@@ -18,10 +18,10 @@ moved to. alai-doc does the same, so `alai-doc win_copy` shows
 redirected from. Inside a collection project, alai-doc looks in
 the project's own collection first, as a play in one of its roles would.
 
-A short name that is not in the ansible-core routing or in the current
-collection's project will result in a failure. alai-doc suggests the
-collections that have a plugin by that name instead, from the plugin
-index alai searches.
+When a short name is neither in ansible-core's routing nor in the project's
+own collection, alai-doc stops with an error. The error suggests the
+collections that have a plugin by that name, from the plugin index alai
+searches.
 
 [Finding a plugin by its short name](casts/short-names.cast){ .cli-cast }
 
@@ -33,9 +33,9 @@ describes.
 ## Choosing a type
 
 A collection can have plugins of different types with the same name, such
-as a module and a lookup both called `thing`. alai-doc will error if multiple
-plugins were found under the same name while listing each type that was found.
-Use `-t` to specify the plugin type in the case of multiple matches by name.
+as a module and a lookup both called `thing`. When more than one type has
+the name, alai-doc stops with an error that lists each type, and `-t` picks
+the one to show.
 
 [Choosing a plugin's type](casts/types.cast){ .cli-cast }
 

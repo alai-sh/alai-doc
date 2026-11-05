@@ -18,24 +18,29 @@ from ._alai import BUILTIN, Alai
 from ._common import EXIT_NOT_FOUND, Error
 from ._doc_model import (
     NBSP,
-    SOURCE_ORDER,
     Loaded,
     NotFound,
+    as_entries,
     as_list,
     as_map,
     as_text,
     bare,
+    choices_of,
+    default_text,
     deprecation_text,
-    entries_under,
     entry_points,
+    kind_text,
     load,
     nested_entries,
+    not_shown,
     origin_text,
     paragraphs_of,
     readme,
     rich_text,
+    sources_of,
     split_arguments,
     summary,
+    support_text,
     type_name,
     unnamed_return,
     usage,
@@ -69,22 +74,19 @@ def doc(alai: Alai, name: str, *, types: list[str], output_format: str | None = 
 
         return view(alai, loaded)
 
-    sys.stdout.write(markdown(loaded, loaded.located.latest))
+    sys.stdout.write(markdown(loaded))
     sys.stdout.flush()
     return 0
 
 
-def markdown(loaded: Loaded, latest: str | None) -> str:
-    """The docs of each plugin ``loaded`` has, as Markdown: each option a list item, its suboptions a list in it, and
-    each paragraph a line of its own, unwrapped."""
-    out: list[str] = []
-    for plugin, docs in loaded.plugins:
-        out += _plugin(loaded, plugin, docs, latest)
-    return "\n".join(out).rstrip("\n") + "\n"
+def markdown(loaded: Loaded) -> str:
+    """The plugin's docs as Markdown: each option a list item, its suboptions a list in it, and each paragraph a line
+    of its own, unwrapped."""
+    return "\n".join(_page(loaded)).rstrip("\n") + "\n"
 
 
-def _plugin(loaded: Loaded, plugin: ape.Plugin, docs: ape.PluginDocs | None, latest: str | None) -> list[str]:
-    collection = loaded.collection
+def _page(loaded: Loaded) -> list[str]:
+    collection, plugin, docs = loaded.collection, loaded.plugin, loaded.docs
     parts = entry_points(plugin, docs, loaded.located) if docs is not None else []
     # A role's header is its main entry point's, and a role without one has only its name.
     documentation = as_map(parts[0][1].documentation) if parts and parts[0][0] in (None, "main") else {}
@@ -93,13 +95,7 @@ def _plugin(loaded: Loaded, plugin: ape.Plugin, docs: ape.PluginDocs | None, lat
     if short:
         out += [_inline(as_sentence(markup(short))), ""]
 
-    origin = origin_text(loaded.located)
-    if latest:
-        origin = f"{origin.rstrip('.')}, but {latest} is the latest."
-    kind = plugin.type
-    if plugin.type == "callback" and (callback := as_text(documentation.get("type"))):
-        kind = f"{callback} callback"
-    facts = [f"Type: {kind}", f"Version: {_escape(origin)}"]
+    facts = [f"Type: {kind_text(plugin, documentation)}", f"Version: {_escape(origin_text(loaded.located))}"]
     if loaded.redirects:
         facts.append(f"Redirected from: {', '.join(f'`{r}`' for r in loaded.redirects)}")
     if authors := paragraphs_of(documentation.get("author")):
@@ -108,13 +104,8 @@ def _plugin(loaded: Loaded, plugin: ape.Plugin, docs: ape.PluginDocs | None, lat
         facts.append(f"Added in: {'' if collection == BUILTIN else collection + ' '}{_escape(as_text(added))}")
     if deprecated := deprecation_text(documentation.get("deprecated")):
         facts.append(_deprecated(deprecated))
-    if docs is not None and (missing := sorted({*docs.fragments, *docs.return_fragments})):
-        what = "fragment" if len(missing) == 1 else "fragments"
-        verb = "adds" if len(missing) == 1 else "add"
-        names = and_list([f"`{m}`" for m in missing])
-        facts.append(
-            f"Not shown: what the doc {what} {names} {verb}, which couldn't be found or read without running code"
-        )
+    if docs is not None and (missing := not_shown(docs, "`")):
+        facts.append(missing)
     found = readme(loaded)
     if found is not None and docs is not None:
         facts.append(f"README: {_escape(home_path(str(found[0])))}")
@@ -178,7 +169,7 @@ def _body(
         code = "\n".join(line.rstrip() for line in docs.examples.strip("\n").splitlines())
         fence = "```" if "```" not in code else "~~~~"
         out += [f"{level} Examples", "", f"{fence}yaml", code, fence, ""]
-    returns = entries_under({"returns": docs.returns}, "returns")
+    returns = as_entries(docs.returns)
     if (value := unnamed_return(plugin_type, returns)) is not None:
         # The type, then what it is, as the first paragraph's start.
         described = paragraphs_of(value.get("description")) or [""]
@@ -195,7 +186,7 @@ def _body(
 def _attributes(value: object) -> list[str]:
     """The attributes as a table: each one's support, or for ``platform`` and the like their values, and any
     details."""
-    attributes = entries_under({"attributes": value}, "attributes")
+    attributes = as_entries(value)
     if not attributes:
         return []
     with_details = any(paragraphs_of(a.get("details")) for a in attributes.values())
@@ -205,12 +196,8 @@ def _attributes(value: object) -> list[str]:
         else ["| Attribute | Support |", "|---|---|"]
     )
     for name, attribute in attributes.items():
-        support = as_text(attribute.get("support"))
-        for key in ("platforms", "membership"):
-            if (values := attribute.get(key)) is not None:
-                support = (
-                    ", ".join(as_text(v) for v in as_list(values)) if isinstance(values, list) else as_text(values)
-                )
+        values = support_text(attribute)
+        support = values if values is not None else as_text(attribute.get("support"))
         details = " ".join(paragraphs_of(attribute.get("details")))
         cells = [_escape(name), _escape(support), *([_inline(rich_text(details))] if with_details else [])]
         rows.append("| " + " | ".join(cell.replace("|", "\\|") for cell in cells) + " |")
@@ -230,8 +217,8 @@ def _entries(entries: dict[str, dict[str, object]], depth: int, parent: str | No
         else:
             if entry.get("required") is True:
                 head.append("required" if parent is None else f"required when **{_escape(parent)}** is given")
-            if "default" in entry and entry.get("default") is not None:
-                head.append(f"default {_code(yaml_value(entry['default']))}")
+            if (default := default_text(entry)) is not None:
+                head.append(f"default {_code(default)}")
         out += [f"{indent}- {' · '.join(head)}", ""]
         body = indent + "  "
         for paragraph in paragraphs_of(entry.get("description")):
@@ -246,18 +233,15 @@ def _option(option: dict[str, object]) -> list[str]:
     """What's known of an option besides its description: choices, aliases, version added, deprecation and, for
     plugins, where it can be set."""
     out: list[str] = []
-    default = option.get("default")
-    mark = yaml_value(default) if "default" in option and default is not None else None
-    choices = option.get("choices")
-    if isinstance(choices, dict):
+    choices = choices_of(option)
+    if any(text for _, text, _ in choices):
         out += ["Choices:", ""]
-        for value, description in as_map(choices).items():
-            shown = _code(yaml_value(value)) + (" (default)" if yaml_value(value) == mark else "")
-            text = " ".join(paragraphs_of(description))
+        for value, text, default in choices:
+            shown = _code(value) + (" (default)" if default else "")
             out.append(f"- {shown}" + (f": {_paragraph(text)}" if text else ""))
         out.append("")
-    elif values := as_list(choices):
-        shown = [_code(yaml_value(v)) + (" (default)" if yaml_value(v) == mark else "") for v in values]
+    elif choices:
+        shown = [_code(value) + (" (default)" if default else "") for value, _, default in choices]
         out += [f"Choices: {', '.join(shown)}.", ""]
     extra: list[str] = []
     if aliases := as_list(option.get("aliases")):
@@ -269,23 +253,9 @@ def _option(option: dict[str, object]) -> list[str]:
         out += [" ".join(extra), ""]
     if deprecated := deprecation_text(option.get("deprecated")):
         out += [_deprecated(deprecated), ""]
-    for kind in SOURCE_ORDER:
-        entries = [as_map(e) for e in as_list(option.get(kind)) if isinstance(e, dict)]
-        if not entries:
-            continue
-        # Highest precedence first: within a kind, the last one listed wins.
-        shown = []
-        for entry in reversed(entries):
-            if kind == "ini":
-                where = f"[{as_text(entry.get('section') or 'defaults')}] {as_text(entry.get('key'))}"
-            else:
-                where = as_text(entry.get("name"))
-            note = ""
-            if isinstance(gone := entry.get("deprecated"), dict):
-                removed = as_text(as_map(gone).get("removed_in") or as_map(gone).get("version"))
-                note = " (deprecated" + (f", removed in {removed}" if removed else "") + ")"
-            shown.append(f"`{where}`{note}")
-        out += [f"{kind.removesuffix('s')}: {', '.join(shown)}", ""]
+    for kind, settings in sources_of(option):
+        shown = [f"`{where}`" + (f" ({note})" if note else "") for where, note in settings]
+        out += [f"{kind}: {', '.join(shown)}", ""]
     return out
 
 
